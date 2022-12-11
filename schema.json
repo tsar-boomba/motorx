@@ -1,0 +1,91 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$id": "MotorxConfig",
+	"title": "Motorx Config",
+	"description": "Configuration for Motorx reverse-proxy server.",
+	"type": "object",
+	"properties": {
+		"addr": {
+			"description": "Tcp socket the proxy should listen on ex. 127.0.0.1:4000",
+			"type": "string"
+		},
+		"max_connections": {
+			"description": "Max number of connections allowed to the proxy. (default 100)",
+			"type": "integer"
+		},
+		"rules": {
+			"description": "Rules for routing requests to upstream servers.",
+			"type": "array",
+			"items": {
+				"$ref": "#/$defs/rule"
+			},
+			"minItems": 1
+		},
+		"upstreams": {
+			"type": "object",
+			"additionalProperties": { "$ref": "#/$defs/upstream" },
+			"minProperties": 1
+		}
+	},
+	"required": ["addr", "rules"],
+	"$defs": {
+		"rule": {
+			"title": "Rule",
+			"description": "Rule for matching and proxying requests.",
+			"type": "object",
+			"properties": {
+				"path": { "$ref": "#/$defs/matcher" },
+				"upstream": {
+					"description": "Address of upstream server matched requests should be proxied to.",
+					"type": "string"
+				},
+				"match_headers": {
+					"description": "Object of header names and matchers to only allow requests with specific headers through.",
+					"type": "object",
+					"additionalProperties": { "$ref": "#/$defs/matcher" }
+				},
+				"cache": { "$ref": "#/$defs/cache" }
+			},
+			"required": ["path", "upstream"]
+		},
+		"cache": {
+			"title": "Cache Settings",
+			"description": "Control caching for a rule.",
+			"type": "object",
+			"properties": {
+				"methods": {
+					"description": "What methods should have their requests cached",
+					"type": "array",
+					"minItems": 1,
+					"items": {
+						"type": "string"
+					}
+				},
+				"max_age": {
+					"description": "How long, using `std::time::Duration`'s deserialization until responses are stale.",
+					"type": "string"
+				}
+			}
+		},
+		"matcher": {
+			"title": "Matcher",
+			"description": "Syntax for matching values in a request. ex. regex(^bruh/.*$)",
+			"type": "string"
+		},
+		"upstream": {
+			"description": "A server which requests can be proxied to",
+			"type": "object",
+			"properties": {
+				"addr": {
+					"description": "Address of upstream server.",
+					"type": "string"
+				},
+				"max_connections": {
+					"description": "Maximum number of connections to this upstream server.",
+					"type": "integer"
+				}
+			},
+			"required": ["addr"]
+		}
+	}
+}

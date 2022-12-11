@@ -1,0 +1,23 @@
+{
+	"$schema": "schema.json",
+	"addr": "127.0.0.1:4000",
+	"rules": [
+		{
+			"path": "/",
+			"upstream": "server"
+		},
+		{
+			"path": "/posts",
+			"upstream": "server",
+			"cache": {
+				"methods": ["GET"]
+			}
+		}
+	],
+	"upstreams": {
+		"server": {
+			"addr": "http://127.0.0.1:3000",
+			"max_connections": 10
+		}
+	}
+}

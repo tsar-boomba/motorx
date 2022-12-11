@@ -1,0 +1,25 @@
+[package]
+name = "motorx"
+version = "0.0.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+motorx-core = { path = "motorx-core", features = ["full"] }
+tokio = { workspace = true, features = ["full"] }
+tracing-subscriber = { version = "0.3.16", features = ["env-filter", "fmt", "parking_lot"] }
+tracing = { workspace = true, features = [] }
+
+[profile.release]
+debug = true
+
+[workspace]
+members = [
+	"motorx-core",
+	"."
+]
+
+[workspace.dependencies]
+tokio = "1.21.2"
+tracing = "0.1"
