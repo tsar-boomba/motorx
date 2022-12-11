@@ -1,7 +1,7 @@
 mod util;
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Instant;
 
 use bytes::Bytes;
@@ -101,7 +101,7 @@ async fn handle_match(
                     let Cache {
                         cached_at,
                         value,
-                        broadcast,
+                        inflight,
                     } = &*cache;
 
                     if let Some(cached_at) = cached_at {
@@ -113,16 +113,16 @@ async fn handle_match(
                             }
                         }
                     }
-                    
-                    let broadcast = broadcast.as_ref().cloned();
+
+                    let inflight = inflight.as_ref().cloned();
                     drop(cache);
 
-                    if let Some(broadcast) = broadcast {
+                    if let Some(inflight) = inflight.as_ref().and_then(Weak::upgrade) {
                         // request is inflight to update cache, wait for it
                         cfg_logging! {trace!("No cache found for {}, waiting on inflight request...", req.uri());}
 
                         // dont hold lock while waiting for inflight
-                        if let Ok(Some(res)) = broadcast.subscribe().recv().await {
+                        if let Ok(Some(res)) = inflight.subscribe().recv().await {
                             return Ok(res.0.map(|b| util::full(b)));
                         } else {
                             // inflight request failed, proceed as normal
@@ -134,14 +134,21 @@ async fn handle_match(
                         let sender = Arc::new(
                             broadcast::channel::<Option<CloneableRes<Bytes>>>(max_connections).0,
                         );
-                        CACHES.get().unwrap().get(rule).unwrap().write().await.insert(
-                            req.uri().clone(),
-                            Arc::new(Mutex::new(Cache {
-                                cached_at: None,
-                                value: None,
-                                broadcast: Some(sender.clone()),
-                            })),
-                        );
+                        CACHES
+                            .get()
+                            .unwrap()
+                            .get(rule)
+                            .unwrap()
+                            .write()
+                            .await
+                            .insert(
+                                req.uri().clone(),
+                                Arc::new(Mutex::new(Cache {
+                                    cached_at: None,
+                                    value: None,
+                                    inflight: Some(Arc::downgrade(&sender)),
+                                })),
+                            );
 
                         Some(sender)
                     }
@@ -151,14 +158,21 @@ async fn handle_match(
                     let sender = Arc::new(
                         broadcast::channel::<Option<CloneableRes<Bytes>>>(max_connections).0,
                     );
-                    CACHES.get().unwrap().get(rule).unwrap().write().await.insert(
-                        req.uri().clone(),
-                        Arc::new(Mutex::new(Cache {
-                            cached_at: None,
-                            value: None,
-                            broadcast: Some(sender.clone()),
-                        })),
-                    );
+                    CACHES
+                        .get()
+                        .unwrap()
+                        .get(rule)
+                        .unwrap()
+                        .write()
+                        .await
+                        .insert(
+                            req.uri().clone(),
+                            Arc::new(Mutex::new(Cache {
+                                cached_at: None,
+                                value: None,
+                                inflight: Some(Arc::downgrade(&sender)),
+                            })),
+                        );
 
                     Some(sender)
                 }
@@ -220,7 +234,7 @@ async fn handle_match(
 
                         cache.cached_at = Some(Instant::now());
                         cache.value = Some(cloneable.0);
-                        cache.broadcast = None;
+                        cache.inflight = None;
                     } else {
                         // cache needs to be created
                         let mut rule_cache = rule_cache.write().await;
@@ -238,7 +252,7 @@ async fn handle_match(
                             Arc::new(Mutex::new(Cache {
                                 cached_at: Some(Instant::now()),
                                 value: Some(cloneable.0),
-                                broadcast: None,
+                                inflight: None,
                             })),
                         );
                     };

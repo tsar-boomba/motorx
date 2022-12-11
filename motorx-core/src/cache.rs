@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Deref, sync::Arc, time::Instant};
+use std::{collections::HashMap, ops::Deref, sync::{Arc, Weak}, time::Instant};
 
 use bytes::Bytes;
 use http::Uri;
@@ -41,14 +41,16 @@ pub(crate) struct Cache {
     /// Res is an option so i can take & clone it
     pub(crate) cached_at: Option<Instant>,
     pub(crate) value: Option<Response<Bytes>>,
-    pub(crate) broadcast: Option<Arc<broadcast::Sender<Option<CloneableRes<Bytes>>>>>,
+    pub(crate) inflight: Option<Weak<broadcast::Sender<Option<CloneableRes<Bytes>>>>>,
 }
 
 pub(crate) fn init_caches(config: &Config) {
-    CACHES.set(HashMap::from_iter(
-        config
-            .rules
-            .iter()
-            .map(|rule| (rule.clone(), RwLock::new(HashMap::new()))),
-    )).unwrap();
+    CACHES
+        .set(HashMap::from_iter(
+            config
+                .rules
+                .iter()
+                .map(|rule| (rule.clone(), RwLock::new(HashMap::new()))),
+        ))
+        .unwrap();
 }
