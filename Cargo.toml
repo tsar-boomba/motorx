@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 motorx-core = { path = "motorx-core", features = ["full"] }
-tokio = { workspace = true, features = ["full"] }
+tokio = { workspace = true, features = ["rt", "rt-multi-thread", "macros"] }
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "fmt", "parking_lot"] }
 tracing = { workspace = true, features = [] }
 

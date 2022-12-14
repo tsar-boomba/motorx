@@ -3,7 +3,7 @@ use std::{fs::read_to_string, str::FromStr};
 use tracing::debug;
 use tracing_subscriber::EnvFilter;
 
-use motorx_core::{config::Config, Server};
+use motorx_core::{Config, Server};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

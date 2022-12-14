@@ -1,6 +1,8 @@
 pub mod match_type;
 pub mod rule;
 
+pub use rule::{Rule, CacheSettings};
+
 use std::{net::SocketAddr, str::FromStr, collections::HashMap};
 
 use http::Uri;
@@ -11,7 +13,7 @@ pub struct Config {
     pub addr: SocketAddr,
     pub certs: Option<String>,
     pub private_key: Option<String>,
-    pub rules: Vec<rule::Rule>,
+    pub rules: Vec<Rule>,
     pub upstreams: HashMap<String, Upstream>,
     #[serde(default = "default_server_max_connections")]
     pub max_connections: usize

@@ -38,7 +38,6 @@ impl<T> Deref for CloneableRes<T> {
 #[derive(Debug)]
 pub(crate) struct Cache {
     /// Time it was cached at, and the value
-    /// Res is an option so i can take & clone it
     pub(crate) cached_at: Option<Instant>,
     pub(crate) value: Option<Response<Bytes>>,
     pub(crate) inflight: Option<Weak<broadcast::Sender<Option<CloneableRes<Bytes>>>>>,

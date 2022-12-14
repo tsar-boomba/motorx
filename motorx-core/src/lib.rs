@@ -1,3 +1,19 @@
+//! A reverse-proxy written in pure rust, built on hyper, tokio, and rustls
+//! # Motorx
+//! ## Basic usage
+//! 
+//! ```
+//! #[tokio::main]
+//! async fn main() {
+//!     // Register a tracing subscriber for logging
+//! 
+//!     let server = motorx_core::Server::new(motorx_core::Config { /* Your config here */ });
+//! 
+//!     // start polling and proxying requests
+//!     server.await.unwrap()
+//! }
+//! ```
+
 pub mod config;
 mod conn_pool;
 pub mod error;
@@ -17,7 +33,6 @@ use std::sync::Arc;
 use std::task::ready;
 
 use cache::init_caches;
-use config::Config;
 use conn_pool::init_conn_pools;
 use hyper::body::Incoming;
 use hyper::server;
@@ -29,10 +44,25 @@ use rustls::ServerConfig;
 use tls::stream::TlsStream;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-
-pub use error::Error;
 use tokio::sync::{Semaphore, OwnedSemaphorePermit};
 
+pub use error::Error;
+pub use config::{Config, Rule, CacheSettings};
+
+/// Motorx proxy server
+/// 
+/// Usage:
+/// ```
+/// #[tokio::main]
+/// async fn main() {
+///     // Register a tracing subscriber for logging
+/// 
+///     let server = motorx_core::Server::new(motorx_core::Config { /* Your config here */ });
+/// 
+///     // start polling and proxying requests
+///     server.await.unwrap()
+/// }
+/// ```
 #[must_use = "Server does nothing unless it is `.await`ed"]
 pub struct Server {
     config: Arc<Config>,
@@ -44,14 +74,16 @@ pub struct Server {
 }
 
 impl Server {
+    /// Do configuration shared between raw and tls servers
     fn common_config(mut config: Config) -> (Arc<Config>, TcpListener) {
         init_conn_pools(&config);
         init_caches(&config);
-
-        cfg_logging! {debug!("Starting with config: {config:#?}");}
-
+        
+        
         config.rules.sort_by(|a, b| a.path.cmp(&b.path));
         let config = Arc::new(config);
+
+        cfg_logging! {debug!("Starting with config: {:#?}", *config);}
 
         let listener =
             TcpListener::from_std(std::net::TcpListener::bind(config.addr).unwrap()).unwrap();

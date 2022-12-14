@@ -125,7 +125,7 @@ async fn handle_match(
                         if let Ok(Some(res)) = inflight.subscribe().recv().await {
                             return Ok(res.0.map(|b| util::full(b)));
                         } else {
-                            // inflight request failed, proceed as normal
+                            // inflight request failed, proceed as if caching was disabled
                             None
                         }
                     } else {
