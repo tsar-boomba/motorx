@@ -1,14 +1,14 @@
 //! A reverse-proxy written in pure rust, built on hyper, tokio, and rustls
 //! # Motorx
 //! ## Basic usage
-//! 
+//!
 //! ```
 //! #[tokio::main]
 //! async fn main() {
 //!     // Register a tracing subscriber for logging
-//! 
+//!
 //!     let server = motorx_core::Server::new(motorx_core::Config { /* Your config here */ });
-//! 
+//!
 //!     // start polling and proxying requests
 //!     server.await.unwrap()
 //! }
@@ -44,21 +44,21 @@ use rustls::ServerConfig;
 use tls::stream::TlsStream;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-use tokio::sync::{Semaphore, OwnedSemaphorePermit};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
+pub use config::{CacheSettings, Config, Rule};
 pub use error::Error;
-pub use config::{Config, Rule, CacheSettings};
 
 /// Motorx proxy server
-/// 
+///
 /// Usage:
 /// ```
 /// #[tokio::main]
 /// async fn main() {
 ///     // Register a tracing subscriber for logging
-/// 
+///
 ///     let server = motorx_core::Server::new(motorx_core::Config { /* Your config here */ });
-/// 
+///
 ///     // start polling and proxying requests
 ///     server.await.unwrap()
 /// }
@@ -78,8 +78,7 @@ impl Server {
     fn common_config(mut config: Config) -> (Arc<Config>, TcpListener) {
         init_conn_pools(&config);
         init_caches(&config);
-        
-        
+
         config.rules.sort_by(|a, b| a.path.cmp(&b.path));
         let config = Arc::new(config);
 
@@ -177,7 +176,12 @@ impl std::future::Future for Server {
                         #[cfg(feature = "tls")]
                         if let Some(tls_config) = self.tls_config.as_ref() {
                             let tls_stream = TlsStream::new(stream, Arc::clone(tls_config));
-                            handle_connection(tls_stream, peer_addr, Arc::clone(&self.config), permit)
+                            handle_connection(
+                                tls_stream,
+                                peer_addr,
+                                Arc::clone(&self.config),
+                                permit,
+                            )
                         } else {
                             handle_connection(stream, peer_addr, Arc::clone(&self.config), permit)
                         };
@@ -200,7 +204,7 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     stream: S,
     peer_addr: SocketAddr,
     config: Arc<Config>,
-    permit: OwnedSemaphorePermit
+    permit: OwnedSemaphorePermit,
 ) {
     let service = service_fn(move |req: Request<Incoming>| {
         handle::handle_req(req, peer_addr, Arc::clone(&config))
@@ -224,4 +228,25 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
 
         drop(permit);
     });
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[inline]
+async fn tcp_connect(
+    addr: impl ToString,
+) -> std::io::Result<tokio::net::TcpStream> {
+    tokio::net::TcpStream::connect(addr.to_string()).await
+}
+
+#[cfg(target_os = "wasi")]
+async fn tcp_connect(addr: impl ToString) -> std::io::Result<tokio::net::TcpStream> {
+    let addr = addr.to_string();
+    tokio::spawn(async {
+        let std_stream = std::net::TcpStream::connect(addr)?;
+        // this is probably super unsound lol
+        std_stream.set_nonblocking(true).unwrap();
+        Ok(tokio::net::TcpStream::from_std(std_stream)?)
+    })
+    .await
+    .unwrap()
 }

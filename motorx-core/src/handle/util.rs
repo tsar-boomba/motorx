@@ -4,9 +4,8 @@ use bytes::Bytes;
 use http::{header::HOST, HeaderValue, Request, Response};
 use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
 use hyper::{body::Incoming, upgrade::Upgraded};
-use tokio::net::TcpStream;
 
-use crate::config::Upstream;
+use crate::{config::Upstream, tcp_connect};
 
 pub fn add_proxy_headers(req: &mut Request<Incoming>, upstream: &Upstream, peer_addr: SocketAddr) {
     let proto = req.uri().scheme_str().unwrap_or_default();
@@ -139,7 +138,7 @@ pub async fn read_body<B: BodyExt, E>(
 // the upgraded connection
 pub async fn tunnel(mut upgraded: Upgraded, addr: &str) -> std::io::Result<()> {
     // Connect to remote server
-    let mut server = TcpStream::connect(addr).await?;
+    let mut server = tcp_connect(addr).await?;
 
     // Proxying data
     let (from_client, from_server) =

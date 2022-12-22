@@ -7,7 +7,6 @@ use hyper::{
 };
 use once_cell::sync::OnceCell;
 use tokio::{
-    net::TcpStream,
     select,
     sync::{
         mpsc::{self, Receiver, Sender},
@@ -17,7 +16,7 @@ use tokio::{
 
 use crate::{
     cfg_logging,
-    config::{Config, Upstream},
+    config::{Config, Upstream}, tcp_connect,
 };
 
 pub(crate) static CONN_POOLS: OnceCell<HashMap<Uri, Arc<Mutex<ConnPool>>>> = OnceCell::new();
@@ -55,7 +54,7 @@ impl ConnPool {
                 permit = Arc::clone(&self.semaphore).acquire_owned() => {
                     let permit = permit.unwrap();
                     cfg_logging! {info!("Opened new connection to: {}", upstream.addr);}
-                    let stream = TcpStream::connect(upstream.addr.authority().unwrap().to_string()).await?;
+                    let stream = tcp_connect(upstream.addr.authority().unwrap()).await?;
                     let (sender, conn) = client::conn::http1::Builder::new()
                         .http1_preserve_header_case(true)
                         .http1_title_case_headers(true)

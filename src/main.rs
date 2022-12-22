@@ -5,7 +5,8 @@ use tracing_subscriber::EnvFilter;
 
 use motorx_core::{Config, Server};
 
-#[tokio::main]
+#[cfg_attr(feature = "wasm", tokio::main(flavor = "current_thread"))]
+#[cfg_attr(feature = "default", tokio::main)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     setup_tracing();
 

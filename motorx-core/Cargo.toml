@@ -6,15 +6,21 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-hyper = { version = "1.0.0-rc.1", features = ["full"] }
 http-body = "1.0.0-rc.1"
 http-body-util = "0.1.0-rc.1"
 bytes = "1.2.1"
 http = "0.2.8"
-tokio = { workspace = true, features = ["net", "rt", "parking_lot"] }
 regex = "1.7.0"
 once_cell = { version = "1.16.0", features = ["parking_lot"] }
 thiserror = "1.0.37"
+
+# default
+tokio = { workspace = true, features = ["net", "rt", "parking_lot"], optional = true }
+hyper = { version = "1.0.0-rc.1", features = ["full"], optional = true }
+
+# wasm vers
+tokio_wasi = { workspace = true, features = ["net", "rt", "macros"], optional = true }
+hyper_wasi = { version = "0.15.0", features = ["client", "server"], optional = true }
 
 # logging feature
 tracing = { workspace = true, optional = true }
@@ -33,14 +39,14 @@ serde_json = { version = "1", optional = true }
 http-serde = { version = "1.1.2", optional = true }
 
 [dev-dependencies]
-axum = "0.5" # for servers to proxy to in tests
+axum = "0.6" # for servers to proxy to in tests
 reqwest = "0.11" # to send request to proxy in tests
 tokio = { workspace = true, features = ["full"] }
 tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
 
 [features]
 # temporarily have tls feature on
-default = ["logging", "json-config", "tls"]
+default = ["tokio", "hyper"]
 full = ["logging", "json-config", "tls"]
 
 logging = ["tracing"]
@@ -48,3 +54,4 @@ logging = ["tracing"]
 json-config = ["serde", "serde_json", "http-serde"]
 
 tls = ["rustls", "rustls-native-certs", "rustls-pemfile", "tokio-rustls", "webpki-roots", "futures-util"]
+wasm = ["hyper_wasi", "tokio_wasi"]
