@@ -7,7 +7,7 @@ use std::{collections::HashMap, net::SocketAddr, str::FromStr};
 
 use http::Uri;
 
-#[cfg_attr(feature = "json-config", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
 #[derive(Debug)]
 pub struct Config {
     pub addr: SocketAddr,
@@ -19,10 +19,10 @@ pub struct Config {
     pub max_connections: usize,
 }
 
-#[cfg_attr(feature = "json-config", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
 #[derive(Debug)]
 pub struct Upstream {
-    #[cfg_attr(feature = "json-config", serde(with = "http_serde::uri"))]
+    #[cfg_attr(feature = "serde-config", serde(with = "http_serde::uri"))]
     pub addr: Uri,
     #[serde(default = "default_max_connections")]
     pub max_connections: usize,
@@ -47,12 +47,12 @@ impl Default for Config {
             private_key: Default::default(),
             max_connections: 10,
             rules: Vec::new(),
-            upstreams: HashMap::new()
+            upstreams: HashMap::new(),
         }
     }
 }
 
-#[cfg(feature = "json-config")]
+#[cfg(feature = "serde-config")]
 impl FromStr for Config {
     type Err = serde_json::Error;
 

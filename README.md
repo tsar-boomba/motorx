@@ -6,7 +6,7 @@
 
 - Robust configuration & request filtering
 - Caching
-- Wasm/wasi (coming as soon as hyper_wasi goes 1.0)
+- Wasm/wasi (only with wasmedge)
 
 ## motorx-core
 
@@ -15,5 +15,6 @@ Build your own binary
 ### Crate Features
 
 - `tracing`: Emit log information through `tracing` crate
-- `json-config`: Implements `serde::Deserialize` for config structs
+- `serde-config`: Implements `serde::Deserialize` for config structs
 - `tls`: Adds tls support through `rustls` (not yet tested)
+- `wasm`: no-default-features only, allows compilation for wasm32-wasi and running in wasmedge

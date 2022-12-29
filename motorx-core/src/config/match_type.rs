@@ -166,7 +166,7 @@ impl FromStr for MatchType {
     }
 }
 
-#[cfg(feature = "json-config")]
+#[cfg(feature = "serde-config")]
 mod deserialize_match_type {
     use std::str::FromStr;
 

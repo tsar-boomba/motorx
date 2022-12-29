@@ -6,9 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-motorx-core = { path = "motorx-core", default-features = false, features = ["json-config", "logging"] }
+motorx-core = { path = "motorx-core", default-features = false, features = ["serde-config", "logging"] }
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "fmt", "parking_lot"] }
-tracing = { workspace = true, features = [] }
+tracing = { workspace = true }
 
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"], optional = true }
 

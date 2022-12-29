@@ -84,8 +84,7 @@ impl Server {
 
         cfg_logging! {debug!("Starting with config: {:#?}", *config);}
 
-        let listener =
-            TcpListener::from_std(std::net::TcpListener::bind(config.addr).unwrap()).unwrap();
+        let listener = tcp_listener(config.addr).unwrap();
 
         (config, listener)
     }
@@ -94,7 +93,13 @@ impl Server {
         let (config, listener) = Self::common_config(config);
 
         cfg_logging! {
-            info!("Motorx proxy listening on http://{}", listener.local_addr().unwrap());
+            info!("Motorx proxy listening on http://{}", {
+                // TcpListener::local_addr dont work with wasmedge, so use config which may not be accurate
+                #[cfg(target_os = "wasi")]
+                {config.addr}
+                #[cfg(not(target_os = "wasi"))]
+                listener.local_addr().unwrap()
+            });
         }
 
         Self {
@@ -232,21 +237,24 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
 
 #[cfg(not(target_os = "wasi"))]
 #[inline]
-async fn tcp_connect(
-    addr: impl ToString,
-) -> std::io::Result<tokio::net::TcpStream> {
+fn tcp_listener(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
+    tokio::net::TcpListener::from_std(std::net::TcpListener::bind(addr)?)
+}
+
+#[cfg(target_os = "wasi")]
+#[inline]
+fn tcp_listener(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
+    tokio::net::TcpListener::from_std(wasmedge_wasi_socket::TcpListener::bind(addr, true)?)
+}
+
+#[cfg(not(target_os = "wasi"))]
+#[inline(always)]
+async fn tcp_connect(addr: impl ToString) -> std::io::Result<tokio::net::TcpStream> {
     tokio::net::TcpStream::connect(addr.to_string()).await
 }
 
 #[cfg(target_os = "wasi")]
+#[inline(always)]
 async fn tcp_connect(addr: impl ToString) -> std::io::Result<tokio::net::TcpStream> {
-    let addr = addr.to_string();
-    tokio::spawn(async {
-        let std_stream = std::net::TcpStream::connect(addr)?;
-        // this is probably super unsound lol
-        std_stream.set_nonblocking(true).unwrap();
-        Ok(tokio::net::TcpStream::from_std(std_stream)?)
-    })
-    .await
-    .unwrap()
+    tokio::net::TcpStream::connect(addr.to_string()).await
 }

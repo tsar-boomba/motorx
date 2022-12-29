@@ -250,6 +250,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "h2_wasi"
+version = "0.3.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "756e9dfbaf90887b69ea8113ef9d04a9fec0ec4ac17b84a95006381f6f7966f9"
+dependencies = [
+ "bytes",
+ "fnv",
+ "futures-core",
+ "futures-sink",
+ "futures-util",
+ "http",
+ "indexmap",
+ "slab",
+ "tokio-util_wasi",
+ "tokio_wasi",
+ "tracing",
+]
+
+[[package]]
 name = "hashbrown"
 version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -398,22 +417,21 @@ dependencies = [
 
 [[package]]
 name = "hyper_wasi"
-version = "0.15.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b903a973bd98c326103ea94336a9ffe44c57c71517d6be7639438021053dc6e"
+version = "1.0.0"
+source = "git+https://github.com/WasmEdge/hyper?branch=v1.0.0#1ff115d435124132bca211086aa0762b3dfb149a"
 dependencies = [
  "bytes",
  "futures-channel",
  "futures-core",
  "futures-util",
+ "h2_wasi",
  "http",
- "http-body 0.4.5",
+ "http-body 1.0.0-rc1",
  "httparse",
  "httpdate",
  "itoa",
  "pin-project-lite",
  "tokio_wasi",
- "tower-service",
  "tracing",
  "want",
 ]
@@ -589,6 +607,7 @@ dependencies = [
  "tokio_wasi",
  "tracing",
  "tracing-subscriber",
+ "wasmedge_wasi_socket",
  "webpki-roots",
 ]
 
@@ -1207,14 +1226,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-util_wasi"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d4e7e921c33dc681c0b01aa4c5aa1bf619f46a7040a1565ddb1f84bc4666c1bd"
+dependencies = [
+ "bytes",
+ "futures-core",
+ "futures-sink",
+ "pin-project-lite",
+ "tokio_wasi",
+ "tracing",
+]
+
+[[package]]
 name = "tokio_wasi"
 version = "1.21.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68e9a04f238fa1676caa7c897bf1dbe7a82269b675aca14176a028af7a2167d2"
 dependencies = [
  "autocfg",
+ "bytes",
  "libc",
+ "memchr",
  "mio_wasi",
+ "parking_lot",
  "pin-project-lite",
  "socket2",
  "tokio-macros",

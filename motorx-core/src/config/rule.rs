@@ -6,7 +6,7 @@ use serde::{de::Visitor, Deserializer};
 
 use super::match_type::MatchType;
 
-#[cfg_attr(feature = "json-config", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
 #[derive(Debug, PartialEq, Clone)]
 pub struct Rule {
     /// Rule the path must match
@@ -66,19 +66,19 @@ impl Hash for Rule {
     }
 }
 
-#[cfg_attr(feature = "json-config", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
 #[derive(Debug, Hash, PartialEq, Clone)]
 pub struct CacheSettings {
     /// What methods should have their requests cached
     #[cfg_attr(
-        feature = "json-config",
+        feature = "serde-config",
         serde(
             deserialize_with = "deserialize_method_array",
             default = "default_cache_methods"
         )
     )]
     pub methods: Vec<Method>,
-    #[cfg_attr(feature = "json-config", serde(default = "default_cache_max_age"))]
+    #[cfg_attr(feature = "serde-config", serde(default = "default_cache_max_age"))]
     pub max_age: Duration,
 }
 
