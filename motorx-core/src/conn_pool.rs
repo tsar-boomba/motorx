@@ -19,7 +19,7 @@ use crate::{
     config::{Config, Upstream}, tcp_connect,
 };
 
-pub(crate) static CONN_POOLS: OnceCell<HashMap<Uri, Arc<Mutex<ConnPool>>>> = OnceCell::new();
+pub(crate) static CONN_POOLS: OnceCell<HashMap<Uri, Mutex<ConnPool>>> = OnceCell::new();
 
 /// Handler asks for sender (ConnPool::get_sender)
 ///     - if mpsc::recv is first -> use existing connection
@@ -88,11 +88,11 @@ pub(crate) fn init_conn_pools(config: &Config) {
             let (sender, receiver) = mpsc::channel::<SendRequest<Incoming>>(v.max_connections);
             (
                 v.addr.clone(),
-                Arc::new(Mutex::new(ConnPool {
+                Mutex::new(ConnPool {
                     semaphore: Arc::new(Semaphore::new(v.max_connections)),
                     sender,
                     receiver,
-                })),
+                }),
             )
         })))
         .unwrap();

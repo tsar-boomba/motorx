@@ -35,6 +35,8 @@ impl<T> Deref for CloneableRes<T> {
     }
 }
 
+// Thank you to fasterthanlime's great post about caching!
+// https://fasterthanli.me/articles/request-coalescing-in-async-rust
 #[derive(Debug)]
 pub(crate) struct Cache {
     /// Time it was cached at, and the value

@@ -1,8 +1,7 @@
-use std::{collections::HashMap, hash::Hash, str::FromStr, time::Duration};
+use std::{collections::HashMap, hash::Hash, time::Duration};
 
 use http::Method;
 use hyper::{body::Incoming, Request};
-use serde::{de::Visitor, Deserializer};
 
 use super::match_type::MatchType;
 
@@ -73,7 +72,7 @@ pub struct CacheSettings {
     #[cfg_attr(
         feature = "serde-config",
         serde(
-            deserialize_with = "deserialize_method_array",
+            with = "de_method_vec",
             default = "default_cache_methods"
         )
     )]
@@ -84,34 +83,40 @@ pub struct CacheSettings {
 
 impl Eq for CacheSettings {}
 
-struct MethodArrayVisitor;
+mod de_method_vec {
+    use std::str::FromStr;
 
-impl<'de> Visitor<'de> for MethodArrayVisitor {
-    type Value = Vec<Method>;
+    use http::Method;
+    use serde::{de::Visitor, Deserializer};
+    struct MethodArrayVisitor;
 
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(formatter, "An array of valid http methods.")
-    }
+    impl<'de> Visitor<'de> for MethodArrayVisitor {
+        type Value = Vec<Method>;
 
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-    where
-        A: serde::de::SeqAccess<'de>,
-    {
-        let mut methods = Vec::<Method>::new();
-        while let Ok(Some(item)) = seq.next_element::<&str>() {
-            if let Ok(method) = Method::from_str(item) {
-                methods.push(method);
-            } else {
-                return Err(serde::de::Error::missing_field("Invalid method: {item:?}"));
-            };
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            write!(formatter, "An array of valid http methods.")
         }
 
-        Ok(methods)
-    }
-}
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut methods = Vec::<Method>::new();
+            while let Ok(Some(item)) = seq.next_element::<&str>() {
+                if let Ok(method) = Method::from_str(item) {
+                    methods.push(method);
+                } else {
+                    return Err(serde::de::Error::missing_field("Invalid method: {item:?}"));
+                };
+            }
 
-fn deserialize_method_array<'de, D: Deserializer<'de>>(de: D) -> Result<Vec<Method>, D::Error> {
-    de.deserialize_seq(MethodArrayVisitor)
+            Ok(methods)
+        }
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(de: D) -> Result<Vec<Method>, D::Error> {
+        de.deserialize_seq(MethodArrayVisitor)
+    }
 }
 
 fn default_cache_methods() -> Vec<Method> {

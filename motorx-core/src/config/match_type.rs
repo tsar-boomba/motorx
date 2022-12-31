@@ -7,6 +7,8 @@ use once_cell::sync::Lazy;
 
 use regex::{Captures, Regex};
 
+#[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
+#[cfg_attr(feature = "serde-config", serde(rename_all = "snake_case"))]
 #[derive(Debug, Clone)]
 pub enum MatchType {
     /// Matches from start of subject string, default behavior
@@ -14,6 +16,7 @@ pub enum MatchType {
     /// Matches if this enum's value is contained in the subject string
     Contains(String),
     /// Uses regex pattern to match on subject string, ex. `regex(this_is_my_regex_pattern)`
+    #[serde(with = "de_regex")]
     Regex(Regex),
 }
 
@@ -167,44 +170,29 @@ impl FromStr for MatchType {
 }
 
 #[cfg(feature = "serde-config")]
-mod deserialize_match_type {
+mod de_regex {
     use std::str::FromStr;
 
-    use serde::{de::Visitor, Deserialize};
+    use regex::Regex;
+    use serde::{de::Visitor, Deserializer};
 
-    use super::MatchType;
+    struct RegexVisitor;
 
-    struct MatchTypeVisitor;
-
-    impl<'de> Visitor<'de> for MatchTypeVisitor {
-        type Value = MatchType;
+    impl<'de> Visitor<'de> for RegexVisitor {
+        type Value = Regex;
 
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter
-                .write_str("A plain string for path matching or re({regex}) for regex matching.")
+            write!(formatter, "A valid string of regex.")
         }
 
         fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error,
-        {
-            MatchType::from_str(v).map_err(|e| E::custom(e.0))
-        }
-
-        fn visit_string<E>(self, v: String) -> Result<Self::Value, E>
-        where
-            E: serde::de::Error,
-        {
-            MatchType::from_str(&v).map_err(|e| E::custom(e.0))
+            where
+                E: serde::de::Error, {
+            Regex::from_str(v).map_err(|e| E::custom(e.to_string()))
         }
     }
 
-    impl<'de> Deserialize<'de> for MatchType {
-        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-        where
-            D: serde::Deserializer<'de>,
-        {
-            deserializer.deserialize_str(MatchTypeVisitor)
-        }
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Regex, D::Error> {
+        deserializer.deserialize_str(RegexVisitor)
     }
 }

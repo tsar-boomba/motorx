@@ -1,3 +1,4 @@
+pub mod authentication;
 pub mod match_type;
 pub mod rule;
 
@@ -6,6 +7,8 @@ pub use rule::{CacheSettings, Rule};
 use std::{collections::HashMap, net::SocketAddr, str::FromStr};
 
 use http::Uri;
+
+use self::authentication::Authentication;
 
 #[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
 #[derive(Debug)]
@@ -26,6 +29,7 @@ pub struct Upstream {
     pub addr: Uri,
     #[serde(default = "default_max_connections")]
     pub max_connections: usize,
+    pub authentication: Option<Authentication>,
 }
 
 fn default_max_connections() -> usize {
@@ -41,7 +45,7 @@ impl Default for Config {
         Self {
             addr: SocketAddr::V4(std::net::SocketAddrV4::new(
                 std::net::Ipv4Addr::new(0, 0, 0, 0),
-                0,
+                80,
             )),
             certs: Default::default(),
             private_key: Default::default(),

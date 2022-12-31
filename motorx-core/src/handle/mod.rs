@@ -1,12 +1,11 @@
-mod util;
+pub mod util;
 
 use std::net::SocketAddr;
 use std::sync::{Arc, Weak};
 use std::time::Instant;
 
 use bytes::Bytes;
-use http_body_util::{combinators::BoxBody, BodyExt};
-use hyper::client::conn::http1::SendRequest;
+use http_body_util::combinators::BoxBody;
 use hyper::{body::Incoming, Method, StatusCode};
 use hyper::{Request, Response};
 use tokio::sync::{broadcast, Mutex};
@@ -15,7 +14,6 @@ use crate::cache::{Cache, CloneableRes, CACHES};
 use crate::cfg_logging;
 use crate::config::rule::Rule;
 use crate::config::{Config, Upstream};
-use crate::conn_pool::CONN_POOLS;
 
 #[cfg_attr(
     feature = "logging",
@@ -28,14 +26,16 @@ pub(crate) async fn handle_req(
 ) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {
     for rule in &config.rules {
         if rule.matches(&req) {
-            return handle_match(
-                req,
-                peer_addr,
-                rule,
-                config.upstreams.get(&rule.upstream).expect("`upstream` in a rule should match a key in the `upstreams` property at the root of the config."),
-                config.max_connections
-            )
-            .await;
+            let upstream = config.upstreams.get(&rule.upstream).expect("`upstream` in a rule should match a key in the `upstreams` property at the root of the config.");
+
+            // handle authentication if necessary
+            let auth_res = util::authenticate(&*config, upstream, peer_addr, &req).await?;
+
+            if let Some(res) = auth_res {
+                return Ok(res);
+            };
+
+            return handle_match(req, peer_addr, rule, upstream, config.max_connections).await;
         }
     }
 
@@ -58,33 +58,10 @@ async fn handle_match(
 ) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {
     if Method::CONNECT == req.method() {
         // Don't feel comfortable supporting Connect method right now
-        // have this naive implementation saved below though
         return Ok(Response::builder()
             .status(StatusCode::METHOD_NOT_ALLOWED)
             .body(util::empty())
             .unwrap());
-        // if let Some(addr) = req.uri().authority().map(|a| a.as_str()) {
-        //     tokio::task::spawn(async move {
-        //         match hyper::upgrade::on(req).await {
-        //             Ok(upgraded) => {
-        //                 if let Err(e) = util::tunnel(upgraded, addr).await {
-        //                     cfg_logging! {error!("server io error: {}", e);}
-        //                 };
-        //             }
-        //             Err(e) => {
-        //                 cfg_logging! {error!("upgrade error: {}", e);}
-        //             }
-        //         }
-        //     });
-
-        //     Ok(Response::new(util::empty()))
-        // } else {
-        //     cfg_logging! {error!("CONNECT host is not socket addr: {:?}", req.uri());}
-        //     let mut resp = Response::new(util::full("CONNECT must be to a socket address"));
-        //     *resp.status_mut() = http::StatusCode::BAD_REQUEST;
-
-        //     Ok(resp)
-        // }
     } else {
         // use cache if enabled
         let refresh_cache = if let Some(cache_settings) = rule.cache.as_ref() {
@@ -185,31 +162,8 @@ async fn handle_match(
             None
         };
 
-        let mut conn_pool = CONN_POOLS
-            .get()
-            .unwrap()
-            .get(&upstream.addr)
-            .unwrap()
-            .lock()
-            .await;
-
-        let (queue, mut sender) = match conn_pool.get_sender(upstream).await {
-            Ok(senders) => senders,
-            Err(_) => {
-                cfg_logging! {error!("Failed to connect to {}", upstream.addr);}
-                return Ok(Response::builder()
-                    .status(StatusCode::BAD_GATEWAY)
-                    .body(util::empty())
-                    .unwrap());
-            }
-        };
-        drop(conn_pool);
-
         let req_uri = req.uri().clone();
-        let result = send_request(req, upstream, peer_addr, &mut sender).await;
-
-        // wait for sender to be ready before putting back into the queue
-        tokio::spawn(async move { queue.send(sender).await });
+        let result = util::proxy_request(req, upstream, peer_addr).await;
 
         if let Some(refresh_cache) = refresh_cache {
             match result {
@@ -266,30 +220,4 @@ async fn handle_match(
             result
         }
     }
-}
-
-async fn send_request(
-    mut req: Request<Incoming>,
-    upstream: &Upstream,
-    peer_addr: SocketAddr,
-    sender: &mut SendRequest<Incoming>,
-) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {
-    // wait for conn to be ready, if it closes return a error
-    if let Err(_) = sender.ready().await {
-        cfg_logging! {error!("Connection to {} was unexpectedly closed.", upstream.addr);}
-        return Ok(Response::builder()
-            .status(StatusCode::BAD_GATEWAY)
-            .body(util::empty())
-            .unwrap());
-    }
-
-    util::add_proxy_headers(&mut req, upstream, peer_addr);
-    util::remove_hop_headers(&mut req);
-
-    cfg_logging! {
-        debug!("Proxying request: {:?}", req);
-    }
-
-    let resp = sender.send_request(req).await?;
-    Ok(resp.map(|b| b.map_err(|e| e.into()).boxed()))
 }
