@@ -3,9 +3,14 @@ use std::net::SocketAddr;
 use bytes::Bytes;
 use http::{header::HOST, HeaderValue, Request, Response, StatusCode};
 use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
-use hyper::{body::Incoming, upgrade::Upgraded, client};
+use hyper::{body::Incoming, client, upgrade::Upgraded};
 
-use crate::{cfg_logging, config::{Upstream, authentication::AuthenticationSource}, conn_pool::CONN_POOLS, tcp_connect, Config};
+use crate::{
+    cfg_logging,
+    config::{authentication::AuthenticationSource, Upstream},
+    conn_pool::CONN_POOLS,
+    tcp_connect, Config,
+};
 
 pub fn add_proxy_headers<B>(req: &mut Request<B>, upstream: &Upstream, peer_addr: SocketAddr) {
     let proto = req.uri().scheme_str().unwrap_or_default();
@@ -217,9 +222,7 @@ pub(crate) async fn authenticate<B>(
 
     let auth_upstream = match &authentication.source {
         AuthenticationSource::Path(_) => upstream,
-        AuthenticationSource::Upstream { name, path: _ } => {
-            config.upstreams.get(name).unwrap()
-        }
+        AuthenticationSource::Upstream { name, path: _ } => config.upstreams.get(name).unwrap(),
     };
 
     // TODO in the future, somehow (idk how) use existing conn pool for this

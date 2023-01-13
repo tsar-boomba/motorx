@@ -71,10 +71,7 @@ pub struct CacheSettings {
     /// What methods should have their requests cached
     #[cfg_attr(
         feature = "serde-config",
-        serde(
-            with = "de_method_vec",
-            default = "default_cache_methods"
-        )
+        serde(with = "de_method_vec", default = "default_cache_methods")
     )]
     pub methods: Vec<Method>,
     #[cfg_attr(feature = "serde-config", serde(default = "default_cache_max_age"))]

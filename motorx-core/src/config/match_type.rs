@@ -186,13 +186,16 @@ mod de_regex {
         }
 
         fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: serde::de::Error, {
+        where
+            E: serde::de::Error,
+        {
             Regex::from_str(v).map_err(|e| E::custom(e.to_string()))
         }
     }
 
-    pub(super) fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Regex, D::Error> {
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Regex, D::Error> {
         deserializer.deserialize_str(RegexVisitor)
     }
 }

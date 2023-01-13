@@ -16,7 +16,8 @@ use tokio::{
 
 use crate::{
     cfg_logging,
-    config::{Config, Upstream}, tcp_connect,
+    config::{Config, Upstream},
+    tcp_connect,
 };
 
 pub(crate) static CONN_POOLS: OnceCell<HashMap<Uri, Mutex<ConnPool>>> = OnceCell::new();
@@ -76,7 +77,7 @@ impl ConnPool {
 
             // check that underlying conn exists
             if let Ok(_) = sender.ready().await {
-                return Ok((self.sender.clone(), sender))
+                return Ok((self.sender.clone(), sender));
             }
         }
     }

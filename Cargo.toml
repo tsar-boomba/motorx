@@ -2,12 +2,22 @@
 name = "motorx"
 version = "0.0.0"
 edition = "2021"
+authors = ["Isaiah Gamble <itg.2048@gmail.com>"]
 license = "MIT OR Apache-2.0"
+keywords = ["http", "server", "reverse-proxy"]
+repo = "https://github.com/tsar-boomba/motorx"
+readme = "README.md"
+publish = true
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package.metadata.binstall]
+pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.{ archive-format }"
+bin-dir = "{ bin }{ binary-ext }"
+
+[package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
+pkg-fmt = "zip"
 
 [dependencies]
-motorx-core = { path = "motorx-core", default-features = false, features = ["serde-config", "logging"] }
+motorx-core = { path = "motorx-core", default-features = false, features = ["serde-config", "logging", "tls"] }
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "fmt", "parking_lot"] }
 tracing = { workspace = true }
 

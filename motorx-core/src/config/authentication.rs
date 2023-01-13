@@ -5,19 +5,19 @@ use regex::Regex;
 pub struct Authentication {
     #[serde(default)]
     pub exclude: Vec<PathWithWildCard>,
-	pub source: AuthenticationSource,
+    pub source: AuthenticationSource,
 }
 
 #[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
 #[cfg_attr(feature = "serde-config", serde(rename_all = "snake_case"))]
 #[derive(Debug)]
 pub enum AuthenticationSource {
-	/// Authenticate with another registered upstream
-	Upstream {
-		name: String,
-		path: String
-	},
-	Path(String)
+    /// Authenticate with another registered upstream
+    Upstream {
+        name: String,
+        path: String,
+    },
+    Path(String),
 }
 
 #[derive(Debug)]
@@ -27,12 +27,12 @@ pub enum PathWithWildCard {
 }
 
 impl PathWithWildCard {
-	pub fn matches(&self, subject_path: &str) -> bool {
-		match self {
-			PathWithWildCard::Path(path) => path == subject_path,
-			PathWithWildCard::WithWildCard(re) => re.is_match(subject_path)
-		}
-	}
+    pub fn matches(&self, subject_path: &str) -> bool {
+        match self {
+            PathWithWildCard::Path(path) => path == subject_path,
+            PathWithWildCard::WithWildCard(re) => re.is_match(subject_path),
+        }
+    }
 }
 
 #[cfg(feature = "serde-config")]

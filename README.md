@@ -21,4 +21,4 @@ Build your own binary
 
 ## License
 
-Both `motorx` and `motorx-core` are licensed under the MIT or Apache 2.0 license
+Both `motorx` and `motorx-core` are licensed under the [MIT](LICENSE-MIT) or [Apache 2.0](LICENSE-APACHE) license

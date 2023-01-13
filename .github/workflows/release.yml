@@ -1,0 +1,109 @@
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  create-body:
+    runs-on: ubuntu-latest
+    # outputs:
+    #   body: ${{ steps.create.outputs.upload-url }}
+    steps:
+      - uses: actions/checkout@v3
+      - run: exit 0
+
+  upload-bin:
+    needs: create-body
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-20.04
+            extension: ''
+            cross: true
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-20.04
+            extension: ''
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            extension: '.exe'
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            extension: ''
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            extension: ''
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install cross-compilation tools
+        uses: taiki-e/setup-cross-toolchain-action@v1
+        if: ${{ matrix.cross == true }}
+        with:
+          target: ${{ matrix.target }}
+      - name: Add target
+        if: ${{ !matrix.cross }}
+        run: rustup target add ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Binary
+        run: cargo build --target ${{ matrix.target }} --release --locked -p motorx
+      - name: Move Binary To Root
+        run: cp target/${{ matrix.target }}/release/motorx${{ matrix.extension }} motorx${{ matrix.extension }}
+      - name: Archive Binary
+        shell: bash
+        run: |
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a -tzip "motorx-${{ matrix.target }}.zip" \
+              motorx${{ matrix.extension }} \
+              README.md \
+              LICENSE-APACHE \
+              LICENSE-MIT
+          else
+            tar -czvf motorx-${{ matrix.target }}.tar.gz \
+              motorx${{ matrix.extension }} \
+              README.md \
+              LICENSE-APACHE \
+              LICENSE-MIT
+          fi
+      - name: Add Artifact To Release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          body: ''
+          file: motorx-${{ matrix.target }}*
+          file_glob: true
+          overwrite: true
+          tag: ${{ github.ref }}
+          release_name: ${{ github.ref_name }}
+
+  upload-wasm:
+    name: Upload wasm
+    needs: create-body
+    runs-on: ubuntu-20.04
+    steps:
+      - uses: actions/checkout@v3
+      - name: Add target
+        run: rustup target add wasm32-wasi
+      - uses: Swatinem/rust-cache@v2
+      - name: Build Unoptimized Wasm
+        run: cargo build --release --target=wasm32-wasi --no-default-features -F wasm
+      - name: Install WasmEdge
+        run: curl -sSf https://raw.githubusercontent.com/WasmEdge/WasmEdge/master/utils/install.sh | bash -s -- -v 0.11.2
+      - name: AOT Optimize Wasm
+        run: wasmedgec wasmedgec --optimize 0 target/wasm32-wasi/release/motorx.wasm motorx.wasm
+      - name: Add Optimized Wasm to Release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          body: ''
+          file: motorx.wasm
+          file_glob: true
+          overwrite: true
+          tag: ${{ github.ref }}
+          release_name: ${{ github.ref_name }}
+      

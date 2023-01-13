@@ -1,4 +1,9 @@
-use std::{collections::HashMap, ops::Deref, sync::{Arc, Weak}, time::Instant};
+use std::{
+    collections::HashMap,
+    ops::Deref,
+    sync::{Arc, Weak},
+    time::Instant,
+};
 
 use bytes::Bytes;
 use http::Uri;

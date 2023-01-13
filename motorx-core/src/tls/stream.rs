@@ -1,11 +1,14 @@
 use core::task::{Context, Poll};
 use futures_util::ready;
+use rustls::ServerConfig;
 use std::future::Future;
+use std::io;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::io;
-use tokio::{io::{AsyncRead, AsyncWrite, ReadBuf}, net::TcpStream};
-use rustls::ServerConfig;
+use tokio::{
+    io::{AsyncRead, AsyncWrite, ReadBuf},
+    net::TcpStream,
+};
 
 enum State {
     Handshaking(tokio_rustls::Accept<TcpStream>),
