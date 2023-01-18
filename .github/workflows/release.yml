@@ -24,13 +24,12 @@ jobs:
         with:
           args: --verbose --latest --strip header
       - name: Create initial release
-        uses: svenstaro/upload-release-action@v2
+        uses: softprops/action-gh-release@v1
         with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           body: ${{ steps.git-cliff.outputs.content }}
-          file: motorx-x86_64-pc-windows-msvc.zip
-          tag: ${{ github.ref }}
-          release_name: ${{ github.ref_name }}
+          tag_name: ${{ github.ref }}
+          name: ${{ github.ref_name }}
 
   upload-bin:
     needs: create-body

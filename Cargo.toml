@@ -1,6 +1,6 @@
 [package]
 name = "motorx"
-version = "0.0.10"
+version = "0.0.9"
 edition = "2021"
 authors = ["Isaiah Gamble <itg.2048@gmail.com>"]
 license = "MIT OR Apache-2.0"
