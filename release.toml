@@ -1,4 +1,0 @@
-# will be in alloy-core dir
-pre-release-replacements = [
-	{ file = "Cargo.toml", search = "version = \"{{prev_version}}\"", replace = "version = \"{{version}}\"" }
-]
