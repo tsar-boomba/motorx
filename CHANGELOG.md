@@ -2,12 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [unreleased]
+## [0.0.9] - 2023-01-18
 
 ### Miscellaneous Tasks
 
 - Add changelog & more docs
 - Improve release workflow with changelog
+- Release
 
 ## [0.0.8] - 2023-01-18
 

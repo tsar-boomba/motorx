@@ -21,6 +21,8 @@ jobs:
           fetch-depth: 0
       - uses: orhun/git-cliff-action@v2
         id: git-cliff
+        with:
+          args: --verbose --latest --strip header
       - name: Create initial release
         uses: svenstaro/upload-release-action@v2
         with:
