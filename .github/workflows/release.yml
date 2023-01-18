@@ -141,7 +141,7 @@ jobs:
             RUST_IMAGE=rust:1.66.1-slim
           push: true
           tags: |
-            igamble/motorx:${VERSION}-${{ matrix.base }}
+            igamble/motorx:${{ env.VERSION }}-${{ matrix.base }}
             igamble/motorx:latest-${{ matrix.base }}
             igamble/motorx:latest
       # for images which are'nt gonna be the latest tag
@@ -155,6 +155,6 @@ jobs:
             RUST_IMAGE=rust:1.66.1-slim
           push: true
           tags: |
-            igamble/motorx:${{ github.ref }}-${{ matrix.base }}
+            igamble/motorx:${{ env.VERSION }}-${{ matrix.base }}
             igamble/motorx:latest-${{ matrix.base }}
       
