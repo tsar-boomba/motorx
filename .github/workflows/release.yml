@@ -12,12 +12,23 @@ permissions:
 
 jobs:
   create-body:
-    runs-on: ubuntu-latest
-    # outputs:
-    #   body: ${{ steps.create.outputs.upload-url }}
+    runs-on: ubuntu-20.04
+    outputs:
+      body: ${{ steps.git-cliff.outputs.content }}
     steps:
       - uses: actions/checkout@v3
-      - run: exit 0
+        with:
+          fetch-depth: 0
+      - uses: orhun/git-cliff-action@v2
+        id: git-cliff
+      - name: Create initial release
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          body: ${{ steps.git-cliff.outputs.content }}
+          file: motorx-x86_64-pc-windows-msvc.zip
+          tag: ${{ github.ref }}
+          release_name: ${{ github.ref_name }}
 
   upload-bin:
     needs: create-body
@@ -78,7 +89,7 @@ jobs:
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          body: ''
+          body: ${{ needs.create-body.outputs.body }}
           file: motorx-${{ matrix.target }}*
           file_glob: true
           overwrite: true
@@ -104,7 +115,7 @@ jobs:
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          body: ''
+          body: ${{ needs.create-body.outputs.body }}
           file: motorx.wasm
           file_glob: true
           overwrite: true

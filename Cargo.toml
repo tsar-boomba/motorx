@@ -17,6 +17,9 @@ bin-dir = "{ bin }{ binary-ext }"
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
 pkg-fmt = "zip"
 
+[package.metadata.release]
+pre-release-hook = ["./tools/changelog.sh"]
+
 [dependencies]
 motorx-core = { path = "motorx-core", version = "0.0.8", default-features = false, features = ["serde-config", "logging", "tls"] }
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "fmt", "parking_lot"] }

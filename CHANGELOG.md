@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [unreleased]
+
+### Miscellaneous Tasks
+
+- Add changelog & more docs
+
 ## [0.0.8] - 2023-01-18
 
 ### Miscellaneous Tasks
