@@ -127,6 +127,10 @@ jobs:
         with:
           username: ${{ secrets.DOCKER_HUB_USERNAME }}
           password: ${{ secrets.DOCKER_HUB_TOKEN }}
+      - name: Version without v
+        run: |
+          TAG=${{ github.ref }}
+          echo "VERSION=${TAG#v}" >> $GITHUB_ENV
       - name: Build and push
         uses: docker/build-push-action@v3
         if: ${{ matrix.base == 'bullseye-slim' }}
@@ -137,7 +141,7 @@ jobs:
             RUST_IMAGE=rust:1.66.1-slim
           push: true
           tags: |
-            igamble/motorx:${{ github.ref }}-${{ matrix.base }}
+            igamble/motorx:${VERSION}-${{ matrix.base }}
             igamble/motorx:latest-${{ matrix.base }}
             igamble/motorx:latest
       # for images which are'nt gonna be the latest tag
