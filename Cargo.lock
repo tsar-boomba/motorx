@@ -574,7 +574,7 @@ dependencies = [
 
 [[package]]
 name = "motorx"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "motorx-core",
  "tokio",
@@ -585,7 +585,7 @@ dependencies = [
 
 [[package]]
 name = "motorx-core"
-version = "0.0.7"
+version = "0.0.8"
 dependencies = [
  "axum",
  "bytes",
