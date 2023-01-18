@@ -417,8 +417,9 @@ dependencies = [
 
 [[package]]
 name = "hyper_wasi"
-version = "1.0.0"
-source = "git+https://github.com/WasmEdge/hyper?branch=v1.0.0#1ff115d435124132bca211086aa0762b3dfb149a"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4b903a973bd98c326103ea94336a9ffe44c57c71517d6be7639438021053dc6e"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -426,14 +427,16 @@ dependencies = [
  "futures-util",
  "h2_wasi",
  "http",
- "http-body 1.0.0-rc1",
+ "http-body 0.4.5",
  "httparse",
  "httpdate",
  "itoa",
  "pin-project-lite",
  "tokio_wasi",
+ "tower-service",
  "tracing",
  "want",
+ "wasmedge_wasi_socket",
 ]
 
 [[package]]

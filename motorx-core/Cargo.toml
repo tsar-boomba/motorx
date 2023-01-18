@@ -27,7 +27,11 @@ hyper = { version = "1.0.0-rc.1", features = ["full"], optional = true }
 
 # wasm
 tokio_wasi = { workspace = true, features = ["net", "rt", "macros", "parking_lot"], optional = true }
-hyper_wasi = { git = "https://github.com/WasmEdge/hyper", branch = "v1.0.0", features = ["full"], optional = true }
+
+# uncomment when hyper v1 officially drops
+#hyper_wasi = { git = "https://github.com/WasmEdge/hyper", branch = "v1.0.0", features = ["full"], optional = true }
+
+hyper_wasi = { version = "0.15.0", features = ["full"], optional = true }
 wasmedge_wasi_socket = { version = "0.4", optional = true }
 
 # logging feature
