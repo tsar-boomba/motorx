@@ -3,7 +3,7 @@ use regex::Regex;
 #[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
 #[derive(Debug)]
 pub struct Authentication {
-    #[serde(default)]
+    #[cfg_attr(feature = "serde-config", serde(default))]
     pub exclude: Vec<PathWithWildCard>,
     pub source: AuthenticationSource,
 }

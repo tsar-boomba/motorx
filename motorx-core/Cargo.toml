@@ -1,6 +1,6 @@
 [package]
 name = "motorx-core"
-version = "0.0.5"
+version = "0.0.3"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 keywords = ["http", "server", "reverse-proxy"]
@@ -22,7 +22,7 @@ once_cell = { version = "1.17.0", features = ["parking_lot"] }
 thiserror = "1"
 
 # default
-tokio = { workspace = true, features = ["net", "rt", "parking_lot"], optional = true }
+tokio = { workspace = true, features = ["net", "rt", "macros", "parking_lot"], optional = true }
 hyper = { version = "1.0.0-rc.1", features = ["full"], optional = true }
 
 # wasm

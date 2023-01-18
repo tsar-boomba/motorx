@@ -80,6 +80,7 @@ pub struct CacheSettings {
 
 impl Eq for CacheSettings {}
 
+#[cfg(feature = "serde-config")]
 mod de_method_vec {
     use std::str::FromStr;
 

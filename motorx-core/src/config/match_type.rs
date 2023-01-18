@@ -16,7 +16,7 @@ pub enum MatchType {
     /// Matches if this enum's value is contained in the subject string
     Contains(String),
     /// Uses regex pattern to match on subject string, ex. `regex(this_is_my_regex_pattern)`
-    #[serde(with = "de_regex")]
+    #[cfg_attr(feature = "serde-config", serde(with = "de_regex"))]
     Regex(Regex),
 }
 
