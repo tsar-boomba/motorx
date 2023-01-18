@@ -1,6 +1,6 @@
 [package]
 name = "motorx"
-version = "0.0.8"
+version = "0.0.9"
 edition = "2021"
 authors = ["Isaiah Gamble <itg.2048@gmail.com>"]
 license = "MIT OR Apache-2.0"
@@ -21,7 +21,7 @@ pkg-fmt = "zip"
 pre-release-hook = ["./tools/changelog.sh"]
 
 [dependencies]
-motorx-core = { path = "motorx-core", version = "0.0.8", default-features = false, features = ["serde-config", "logging", "tls"] }
+motorx-core = { path = "motorx-core", version = "0.0.9", default-features = false, features = ["serde-config", "logging", "tls"] }
 tracing-subscriber = { version = "0.3.16", features = ["env-filter", "fmt", "parking_lot"] }
 tracing = { workspace = true }
 

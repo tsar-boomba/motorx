@@ -7,6 +7,7 @@ All notable changes to this project will be documented in this file.
 ### Miscellaneous Tasks
 
 - Add changelog & more docs
+- Improve release workflow with changelog
 
 ## [0.0.8] - 2023-01-18
 
