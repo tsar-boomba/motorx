@@ -5,9 +5,10 @@ edition = "2021"
 authors = ["Isaiah Gamble <itg.2048@gmail.com>"]
 license = "MIT OR Apache-2.0"
 keywords = ["http", "server", "reverse-proxy"]
-repo = "https://github.com/tsar-boomba/motorx"
+homepage = "https://github.com/tsar-boomba/motorx"
+repository = "https://github.com/tsar-boomba/motorx"
 readme = "README.md"
-publish = true
+description = "A reverse-proxy in pure rust."
 
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/{ name }-{ target }.{ archive-format }"
