@@ -12,6 +12,5 @@ RUN cp target/release/motorx /motorx
 FROM debian:bullseye-slim
 
 COPY --from=build /motorx /motorx
-COPY motorx.json /motorx.json
 
-ENTRYPOINT [ "/motorx" ]
+ENTRYPOINT [ "/motorx", "/motorx.json" ]
