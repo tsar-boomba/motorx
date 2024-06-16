@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 
 use http::Response;
 use hyper::{server, service::service_fn};
+use hyper_util::rt::tokio::{TokioIo, TokioExecutor};
 
 #[tokio::main]
 async fn main() {
@@ -19,12 +20,8 @@ async fn main() {
             let service =
                 service_fn(|req| async { Ok::<_, hyper::Error>(Response::new(req.into_body())) });
             tokio::spawn(async move {
-                if let Err(_) = server::conn::http1::Builder::new()
-                    .http1_preserve_header_case(true)
-                    .http1_title_case_headers(true)
-                    .http1_keep_alive(true)
-                    .serve_connection(stream, service)
-                    .with_upgrades()
+                if let Err(_) = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new())
+                    .serve_connection_with_upgrades(TokioIo::new(stream), service)
                     .await
                 {};
             });

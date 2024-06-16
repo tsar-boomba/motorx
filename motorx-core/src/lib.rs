@@ -35,9 +35,9 @@ use std::task::ready;
 use cache::init_caches;
 use conn_pool::init_conn_pools;
 use hyper::body::Incoming;
-use hyper::server;
 use hyper::service::service_fn;
 use hyper::Request;
+use hyper_util::rt::{TokioExecutor, TokioIo};
 #[cfg(feature = "tls")]
 use rustls::ServerConfig;
 #[cfg(feature = "tls")]
@@ -135,7 +135,6 @@ impl Server {
 
             // Do not use client certificate authentication.
             let mut cfg = rustls::ServerConfig::builder()
-                .with_safe_defaults()
                 .with_no_client_auth()
                 .with_single_cert(certs, key)
                 .unwrap();
@@ -216,12 +215,9 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     });
 
     tokio::spawn(async move {
-        if let Err(err) = server::conn::http1::Builder::new()
-            .http1_preserve_header_case(true)
-            .http1_title_case_headers(true)
-            .http1_keep_alive(true)
-            .serve_connection(stream, service)
-            .with_upgrades()
+        let conn_build = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+        if let Err(err) = conn_build
+            .serve_connection_with_upgrades(TokioIo::new(stream), service)
             .await
         {
             cfg_logging! {trace!("Error handling connection: {err:?}");}
@@ -235,26 +231,12 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     });
 }
 
-#[cfg(not(target_os = "wasi"))]
 #[inline]
 fn tcp_listener(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
     tokio::net::TcpListener::from_std(std::net::TcpListener::bind(addr)?)
 }
 
-#[cfg(target_os = "wasi")]
 #[inline]
-fn tcp_listener(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
-    tokio::net::TcpListener::from_std(wasmedge_wasi_socket::TcpListener::bind(addr, true)?)
-}
-
-#[cfg(not(target_os = "wasi"))]
-#[inline(always)]
-async fn tcp_connect(addr: impl ToString) -> std::io::Result<tokio::net::TcpStream> {
-    tokio::net::TcpStream::connect(addr.to_string()).await
-}
-
-#[cfg(target_os = "wasi")]
-#[inline(always)]
 async fn tcp_connect(addr: impl ToString) -> std::io::Result<tokio::net::TcpStream> {
     tokio::net::TcpStream::connect(addr.to_string()).await
 }

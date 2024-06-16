@@ -6,7 +6,7 @@ cargo build --release
 cd echo-server && cargo build --release && cd ..
 ./echo-server/target/release/echo-server 127.0.0.1:2999 &
 ./target/release/motorx &
-wait 1
+sleep 1
 PROXY_RPS=`oha -z 10s -j --no-tui http://127.0.0.1:4000$1 | jq '.rps.mean'`
 
 # kill proxy process

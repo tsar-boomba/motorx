@@ -5,6 +5,7 @@ use hyper::{
     body::Incoming,
     client::{self, conn::http1::SendRequest},
 };
+use hyper_util::rt::TokioIo;
 use once_cell::sync::OnceCell;
 use tokio::{
     select,
@@ -20,6 +21,9 @@ use crate::{
     tcp_connect,
 };
 
+// TODO: consider using better hash algorithm
+// TODO: use SocketAddr as key instead of Uri (more efficient hash impl)
+// TODO: consider making this non-static part of Server
 pub(crate) static CONN_POOLS: OnceCell<HashMap<Uri, Mutex<ConnPool>>> = OnceCell::new();
 
 /// Handler asks for sender (ConnPool::get_sender)
@@ -57,9 +61,9 @@ impl ConnPool {
                     cfg_logging! {info!("Opened new connection to: {}", upstream.addr);}
                     let stream = tcp_connect(upstream.addr.authority().unwrap()).await?;
                     let (sender, conn) = client::conn::http1::Builder::new()
-                        .http1_preserve_header_case(true)
-                        .http1_title_case_headers(true)
-                        .handshake(stream)
+                        .preserve_header_case(true)
+                        .title_case_headers(true)
+                        .handshake(TokioIo::new(stream))
                         .await?;
 
                     tokio::task::spawn(async move {

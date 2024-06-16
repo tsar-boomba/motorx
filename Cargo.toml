@@ -21,17 +21,11 @@ pkg-fmt = "zip"
 pre-release-hook = ["./tools/changelog.sh"]
 
 [dependencies]
-motorx-core = { path = "motorx-core", version = "0.0.10", default-features = false, features = ["serde-config", "logging", "tls"] }
-tracing-subscriber = { version = "0.3.16", features = ["env-filter", "fmt", "parking_lot"] }
+motorx-core = { path = "motorx-core", version = "0.0.10", features = ["full"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt", "parking_lot"] }
 tracing = { workspace = true }
 
-tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"], optional = true }
-
-tokio_wasi = { workspace = true, features = ["rt", "macros"], optional = true }
-
-[features]
-default = ["tokio", "motorx-core/default"]
-wasm = ["tokio_wasi", "motorx-core/wasm"]
+tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }
 
 [profile.release]
 #debug = true
@@ -43,6 +37,5 @@ members = [
 ]
 
 [workspace.dependencies]
-tokio = "1.21.2"
-tokio_wasi = "1.21.3"
-tracing = "0.1"
+tokio = "1.38.0"
+tracing = "0.1.40"

@@ -132,9 +132,9 @@ impl Hash for MatchType {
     }
 }
 
-static MATCH_RE: Lazy<Arc<Regex>> = Lazy::new(|| Arc::new(Regex::new(r"^regex\((.*)\)$").unwrap()));
-static MATCH_CONTAINS: Lazy<Arc<Regex>> =
-    Lazy::new(|| Arc::new(Regex::new(r"^contains\((.*)\)$").unwrap()));
+static MATCH_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^regex\((.*)\)$").unwrap());
+static MATCH_CONTAINS: Lazy<Regex> =
+    Lazy::new(|| Regex::new(r"^contains\((.*)\)$").unwrap());
 
 #[derive(Debug)]
 pub struct MatchTypeFromStrError(String);

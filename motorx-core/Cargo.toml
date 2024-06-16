@@ -13,51 +13,41 @@ description = "Build your own motorx binary."
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-http-body = "1.0.0-rc.1"
-http-body-util = "0.1.0-rc.1"
-bytes = "1.3"
-http = "0.2.8"
-regex = "1.7"
-once_cell = { version = "1.17.0", features = ["parking_lot"] }
-thiserror = "1"
-
-# default
-tokio = { workspace = true, features = ["net", "rt", "macros", "parking_lot"], optional = true }
-hyper = { version = "1.0.0-rc.1", features = ["full"], optional = true }
-
-# wasm
-tokio_wasi = { workspace = true, features = ["net", "rt", "macros", "parking_lot"], optional = true }
-
-# uncomment when hyper v1 officially drops
-#hyper_wasi = { git = "https://github.com/WasmEdge/hyper", branch = "v1.0.0", features = ["full"], optional = true }
-
-hyper_wasi = { version = "0.15.0", features = ["full"], optional = true }
-wasmedge_wasi_socket = { version = "0.4", optional = true }
+http-body = "1.0.0"
+http-body-util = "0.1.2"
+bytes = "1.6.0"
+http = "1.1.0"
+regex = "1.10.5"
+once_cell = { version = "1.19.0", features = ["parking_lot"] }
+thiserror = "1.0.61"
+tokio = { workspace = true, features = ["net", "rt", "macros", "parking_lot"] }
+hyper = { version = "1.3.1", features = ["full"] }
+hyper-util = { version = "0.1.5", features = ["tokio", "http1", "http2", "server"] }
 
 # logging feature
 tracing = { workspace = true, optional = true }
 
 # tls feature
-rustls-native-certs = { version = "0.6", optional = true }
-rustls = { version = "0.20", default-features = false, optional = true }
-rustls-pemfile = { version = "1.0", optional = true }
-tokio-rustls = { version = "0.23", default-features = false, optional = true  }
-webpki-roots = { version = "0.22", optional = true }
-futures-util = { version = "0.3", optional = true }
+rustls-native-certs = { version = "0.7.0", optional = true }
+rustls = { version = "0.23.10", default-features = false, optional = true }
+rustls-pemfile = { version = "2.1.2", optional = true }
+tokio-rustls = { version = "0.26.0", default-features = false, optional = true  }
+webpki-roots = { version = "0.26.2", optional = true }
+futures-util = { version = "0.3.30", optional = true }
 
 # json-config feature
-serde = { version = "1", features = ["derive"], optional = true }
-serde_json = { version = "1", optional = true }
-http-serde = { version = "1.1.2", optional = true }
+serde = { version = "1.0.203", features = ["derive"], optional = true }
+serde_json = { version = "1.0.117", optional = true }
+http-serde = { version = "2.1.1", optional = true }
+itertools = "0.13.0"
 
 [dev-dependencies]
-axum = "0.6" # for servers to proxy to in tests
-reqwest = "0.11" # to send request to proxy in tests
+axum = "0.7.5" # for upstream in tests
+reqwest = "0.12.4" # to send request to proxy in tests
 tokio = { workspace = true, features = ["full"] }
-tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 
 [features]
-default = ["tokio", "hyper"]
 full = ["logging", "serde-config", "tls"]
 
 logging = ["tracing"]
@@ -65,4 +55,3 @@ logging = ["tracing"]
 serde-config = ["serde", "serde_json", "http-serde"]
 
 tls = ["rustls", "rustls-native-certs", "rustls-pemfile", "tokio-rustls", "webpki-roots", "futures-util"]
-wasm = ["hyper_wasi", "tokio_wasi", "wasmedge_wasi_socket"]

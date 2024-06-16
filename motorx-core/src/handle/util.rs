@@ -4,6 +4,7 @@ use bytes::Bytes;
 use http::{header::HOST, HeaderValue, Request, Response, StatusCode};
 use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
 use hyper::{body::Incoming, client, upgrade::Upgraded};
+use hyper_util::rt::TokioIo;
 
 use crate::{
     cfg_logging,
@@ -229,9 +230,9 @@ pub(crate) async fn authenticate<B>(
     cfg_logging! {info!("Opened new connection to: {}", upstream.addr);}
     let stream = tcp_connect(auth_upstream.addr.authority().unwrap()).await?;
     let (mut sender, conn) = client::conn::http1::Builder::new()
-        .http1_preserve_header_case(true)
-        .http1_title_case_headers(true)
-        .handshake::<_, Empty<Bytes>>(stream)
+        .preserve_header_case(true)
+        .title_case_headers(true)
+        .handshake::<_, Empty<Bytes>>(TokioIo::new(stream))
         .await?;
 
     tokio::task::spawn(async move {
@@ -251,9 +252,10 @@ pub(crate) async fn authenticate<B>(
 
 // Create a TCP connection to host:port, build a tunnel between the connection and
 // the upgraded connection
-pub async fn tunnel(mut upgraded: Upgraded, addr: &str) -> std::io::Result<()> {
+pub async fn tunnel(upgraded: Upgraded, addr: &str) -> std::io::Result<()> {
     // Connect to remote server
     let mut server = tcp_connect(addr).await?;
+    let mut upgraded = TokioIo::new(upgraded);
 
     // Proxying data
     let (from_client, from_server) =

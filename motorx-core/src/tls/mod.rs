@@ -1,5 +1,8 @@
 use std::{fs, io};
 
+use itertools::Itertools;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+
 pub mod stream;
 
 pub(crate) fn error(err: String) -> io::Error {
@@ -7,7 +10,7 @@ pub(crate) fn error(err: String) -> io::Error {
 }
 
 // Load public certificate from file.
-pub(crate) fn load_certs(filename: &str) -> io::Result<Vec<rustls::Certificate>> {
+pub(crate) fn load_certs(filename: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     // Open certificate file.
     let certfile = fs::File::open(filename)
         .map_err(|e| error(format!("failed to open {}: {}", filename, e)))?;
@@ -15,23 +18,27 @@ pub(crate) fn load_certs(filename: &str) -> io::Result<Vec<rustls::Certificate>>
 
     // Load and return certificate.
     let certs = rustls_pemfile::certs(&mut reader)
-        .map_err(|_| error("failed to load certificate".into()))?;
-    Ok(certs.into_iter().map(rustls::Certificate).collect())
+        .try_collect::<_, Vec<_>, _>()
+        .map_err(|e| error(e.to_string()))?;
+
+    Ok(certs)
 }
 
 // Load private key from file.
-pub(crate) fn load_private_key(filename: &str) -> io::Result<rustls::PrivateKey> {
+pub(crate) fn load_private_key(filename: &str) -> io::Result<PrivateKeyDer<'static>> {
     // Open keyfile.
     let keyfile = fs::File::open(filename)
         .map_err(|e| error(format!("failed to open {}: {}", filename, e)))?;
     let mut reader = io::BufReader::new(keyfile);
 
     // Load and return a single private key.
-    let keys = rustls_pemfile::rsa_private_keys(&mut reader)
-        .map_err(|_| error("failed to load private key".into()))?;
+    let mut keys = rustls_pemfile::rsa_private_keys(&mut reader)
+        .try_collect::<_, Vec<_>, _>()
+        .map_err(|e| error(e.to_string()))?;
+
     if keys.len() != 1 {
         return Err(error("expected a single private key".into()));
     }
 
-    Ok(rustls::PrivateKey(keys[0].clone()))
+    Ok(PrivateKeyDer::Pkcs1(keys.swap_remove(0)))
 }
