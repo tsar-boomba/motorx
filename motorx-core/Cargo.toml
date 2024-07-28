@@ -40,9 +40,9 @@ serde = { version = "1.0.203", features = ["derive"], optional = true }
 serde_json = { version = "1.0.117", optional = true }
 http-serde = { version = "2.1.1", optional = true }
 itertools = "0.13.0"
+tokio-util = "0.7.11"
 
 [dev-dependencies]
-axum = "0.7.5" # for upstream in tests
 reqwest = "0.12.4" # to send request to proxy in tests
 tokio = { workspace = true, features = ["full"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }

@@ -1,6 +1,5 @@
 use std::fmt::Display;
 use std::hash::Hash;
-use std::sync::Arc;
 use std::{cmp::Ordering, str::FromStr};
 
 use once_cell::sync::Lazy;
@@ -89,29 +88,23 @@ impl PartialEq for MatchType {
 
 impl Eq for MatchType {}
 
-impl PartialOrd for MatchType {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        match self.priority().partial_cmp(&other.priority()) {
-            Some(ord) => {
-                match ord {
-                    Ordering::Greater => Some(Ordering::Greater),
-                    Ordering::Less => Some(Ordering::Less),
-                    Ordering::Equal => {
-                        // priority was same, use length to break tie
-                        // longer / more specific should be less (go first)
-                        other.length().partial_cmp(&self.length())
-                    }
-                }
+impl Ord for MatchType {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.priority().cmp(&other.priority()) {
+            Ordering::Greater => Ordering::Greater,
+            Ordering::Less => Ordering::Less,
+            Ordering::Equal => {
+                // priority was same, use length to break tie
+                // longer / more specific should be less (go first)
+                other.length().cmp(&self.length())
             }
-            None => None,
         }
     }
 }
 
-impl Ord for MatchType {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // Will never return None, because integer cmp's will never return None
-        self.partial_cmp(other).unwrap()
+impl PartialOrd for MatchType {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -133,8 +126,7 @@ impl Hash for MatchType {
 }
 
 static MATCH_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"^regex\((.*)\)$").unwrap());
-static MATCH_CONTAINS: Lazy<Regex> =
-    Lazy::new(|| Regex::new(r"^contains\((.*)\)$").unwrap());
+static MATCH_CONTAINS: Lazy<Regex> = Lazy::new(|| Regex::new(r"^contains\((.*)\)$").unwrap());
 
 #[derive(Debug)]
 pub struct MatchTypeFromStrError(String);

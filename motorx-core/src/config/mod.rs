@@ -30,16 +30,16 @@ pub struct Config {
 pub struct Upstream {
     #[cfg_attr(feature = "serde-config", serde(with = "http_serde::uri"))]
     pub addr: Uri,
-    #[cfg_attr(feature = "serde-config", serde(default = "default_max_connections"))]
+    #[cfg_attr(feature = "serde-config", serde(default = "default_upstream_max_connections"))]
     pub max_connections: usize,
     pub authentication: Option<Authentication>,
 }
 
-fn default_max_connections() -> usize {
+const fn default_upstream_max_connections() -> usize {
     10
 }
 
-fn default_server_max_connections() -> usize {
+const fn default_server_max_connections() -> usize {
     100
 }
 
@@ -52,7 +52,7 @@ impl Default for Config {
             )),
             certs: Default::default(),
             private_key: Default::default(),
-            max_connections: 10,
+            max_connections: default_server_max_connections(),
             rules: Vec::new(),
             upstreams: HashMap::new(),
         }

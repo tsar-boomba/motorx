@@ -21,6 +21,8 @@ mod handle;
 #[macro_use]
 pub mod log;
 mod cache;
+#[cfg(test)]
+mod e2e;
 #[cfg(feature = "tls")]
 pub mod tls;
 
@@ -48,6 +50,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 pub use config::{CacheSettings, Config, Rule};
 pub use error::Error;
+use tokio_util::sync::PollSemaphore;
 
 /// Motorx proxy server
 ///
@@ -160,50 +163,39 @@ impl Server {
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
         self.listener.local_addr()
     }
-}
 
-impl std::future::Future for Server {
-    type Output = Result<(), hyper::Error>;
-
-    fn poll(
-        self: std::pin::Pin<&mut Self>,
-        cx: &mut std::task::Context<'_>,
-    ) -> std::task::Poll<Self::Output> {
-        loop {
-            if let Ok(permit) = Arc::clone(&self.semaphore).try_acquire_owned() {
-                match ready!(self.listener.poll_accept(cx)) {
-                    Ok((stream, peer_addr)) => {
-                        cfg_logging! {
-                            trace!("Accepted connection from {}", peer_addr);
-                        }
-
-                        #[cfg(feature = "tls")]
-                        if let Some(tls_config) = self.tls_config.as_ref() {
-                            let tls_stream = TlsStream::new(stream, Arc::clone(tls_config));
-                            handle_connection(
-                                tls_stream,
-                                peer_addr,
-                                Arc::clone(&self.config),
-                                permit,
-                            )
-                        } else {
-                            handle_connection(stream, peer_addr, Arc::clone(&self.config), permit)
-                        };
-                        #[cfg(not(feature = "tls"))]
-                        handle_connection(stream, peer_addr, Arc::clone(&self.config), permit);
+    pub async fn run(self) -> Result<(), hyper::Error> {
+        println!("Getting semaphore");
+        if let Ok(permit) = self.semaphore.clone().acquire_owned().await {
+            println!("Polling listener");
+            match self.listener.accept().await {
+                Ok((stream, peer_addr)) => {
+                    cfg_logging! {
+                        trace!("Accepted connection from {}", peer_addr);
                     }
-                    Err(e) => {
-                        cfg_logging! {
-                            error!("Error connecting, {:?}", e);
-                        }
+
+                    #[cfg(feature = "tls")]
+                    if let Some(tls_config) = self.tls_config.as_ref() {
+                        let tls_stream = TlsStream::new(stream, Arc::clone(tls_config));
+                        handle_connection(tls_stream, peer_addr, Arc::clone(&self.config), permit)
+                    } else {
+                        handle_connection(stream, peer_addr, Arc::clone(&self.config), permit)
+                    };
+                    #[cfg(not(feature = "tls"))]
+                    handle_connection(stream, peer_addr, Arc::clone(&self.config), permit);
+                }
+                Err(e) => {
+                    cfg_logging! {
+                        error!("Error connecting, {:?}", e);
                     }
                 }
             }
         }
+        Ok(())
     }
 }
 
-#[cfg_attr(feature = "logging", tracing::instrument(skip(stream, config)))]
+#[cfg_attr(feature = "logging", tracing::instrument(skip(stream, config, permit)))]
 fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     stream: S,
     peer_addr: SocketAddr,
@@ -211,10 +203,20 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     permit: OwnedSemaphorePermit,
 ) {
     let service = service_fn(move |req: Request<Incoming>| {
-        handle::handle_req(req, peer_addr, Arc::clone(&config))
+        let config = config.clone();
+        async move {
+            let res = handle::handle_req(req, peer_addr, Arc::clone(&config)).await;
+            cfg_logging! {
+                trace!("Responded to req from {}", peer_addr);
+            }
+            res
+        }
     });
 
     tokio::spawn(async move {
+        cfg_logging! {
+            trace!("Handling connection from {}", peer_addr);
+        }
         let conn_build = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
         if let Err(err) = conn_build
             .serve_connection_with_upgrades(TokioIo::new(stream), service)
