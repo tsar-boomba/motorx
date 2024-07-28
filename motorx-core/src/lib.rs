@@ -165,33 +165,39 @@ impl Server {
     }
 
     pub async fn run(self) -> Result<(), hyper::Error> {
-        println!("Getting semaphore");
-        if let Ok(permit) = self.semaphore.clone().acquire_owned().await {
-            println!("Polling listener");
-            match self.listener.accept().await {
-                Ok((stream, peer_addr)) => {
-                    cfg_logging! {
-                        trace!("Accepted connection from {}", peer_addr);
-                    }
+        loop {
+            println!("Getting semaphore");
+            if let Ok(permit) = self.semaphore.clone().acquire_owned().await {
+                println!("Polling listener");
+                match self.listener.accept().await {
+                    Ok((stream, peer_addr)) => {
+                        cfg_logging! {
+                            trace!("Accepted connection from {}", peer_addr);
+                        }
 
-                    #[cfg(feature = "tls")]
-                    if let Some(tls_config) = self.tls_config.as_ref() {
-                        let tls_stream = TlsStream::new(stream, Arc::clone(tls_config));
-                        handle_connection(tls_stream, peer_addr, Arc::clone(&self.config), permit)
-                    } else {
-                        handle_connection(stream, peer_addr, Arc::clone(&self.config), permit)
-                    };
-                    #[cfg(not(feature = "tls"))]
-                    handle_connection(stream, peer_addr, Arc::clone(&self.config), permit);
-                }
-                Err(e) => {
-                    cfg_logging! {
-                        error!("Error connecting, {:?}", e);
+                        #[cfg(feature = "tls")]
+                        if let Some(tls_config) = self.tls_config.as_ref() {
+                            let tls_stream = TlsStream::new(stream, Arc::clone(tls_config));
+                            handle_connection(
+                                tls_stream,
+                                peer_addr,
+                                Arc::clone(&self.config),
+                                permit,
+                            )
+                        } else {
+                            handle_connection(stream, peer_addr, Arc::clone(&self.config), permit)
+                        };
+                        #[cfg(not(feature = "tls"))]
+                        handle_connection(stream, peer_addr, Arc::clone(&self.config), permit);
+                    }
+                    Err(e) => {
+                        cfg_logging! {
+                            error!("Error connecting, {:?}", e);
+                        }
                     }
                 }
             }
         }
-        Ok(())
     }
 }
 
