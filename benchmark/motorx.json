@@ -3,7 +3,7 @@
 	"addr": "0.0.0.0:80",
 	"rules": [
 		{
-			"path": "/",
+			"path": { "start": "/" },
 			"upstream": "server"
 		}
 	],

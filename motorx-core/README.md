@@ -8,6 +8,6 @@ use motorx_core::{Server, Config};
 #[tokio::main]
 async fn main() {
     let server = Server::new(Config { /* your config here */ });
-    server.await.unwrap();
+    server.run().await.unwrap();
 }
 ```

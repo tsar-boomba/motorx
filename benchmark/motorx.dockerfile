@@ -1,9 +1,9 @@
-FROM rust:1.66-slim-bullseye as echo
+FROM rust:1.82-slim-bullseye AS echo
 WORKDIR /app
 COPY ./echo-server .
 RUN cargo build --release
 
-FROM rust:1.66-slim-bullseye as builder
+FROM rust:1.82-slim-bullseye AS builder
 WORKDIR /app
 
 # im too lazy to do this efficiently
