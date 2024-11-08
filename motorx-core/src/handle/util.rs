@@ -23,7 +23,7 @@ pub fn add_proxy_headers<B>(req: &mut Request<B>, upstream: &Upstream, peer_addr
 
     let host = req
         .headers()
-        .get("Host")
+        .get("host")
         .map(|h| h.to_str().unwrap_or_default())
         .unwrap_or_default();
     let host = if host.is_empty() {
@@ -34,7 +34,7 @@ pub fn add_proxy_headers<B>(req: &mut Request<B>, upstream: &Upstream, peer_addr
 
     let headers = req.headers_mut();
     headers.append(
-        "Forwarded",
+        "forwarded",
         HeaderValue::from_str(&format!(
             "for={};{}{}",
             match peer_addr {
@@ -49,7 +49,7 @@ pub fn add_proxy_headers<B>(req: &mut Request<B>, upstream: &Upstream, peer_addr
         .unwrap(),
     );
     headers.append(
-        "X-Forwarded-For",
+        "x-forwarded-for",
         HeaderValue::from_str(&format!("{}", peer_addr)).unwrap(),
     );
     // change host to be correct for the upstream
@@ -66,14 +66,14 @@ pub fn add_proxy_headers<B>(req: &mut Request<B>, upstream: &Upstream, peer_addr
 }
 
 const HOP_HEADERS: [&str; 8] = [
-    "Connection",
-    "Keep-Alive",
-    "Proxy-Authenticate",
-    "Proxy-Authorization",
-    "TE",
-    "Trailer",
-    "Transfer-Encoding",
-    "Upgrade",
+    "connection",
+    "keep-alive",
+    "proxy-authenticate",
+    "proxy-authorization",
+    "tt",
+    "trailer",
+    "transfer-encoding",
+    "upgrade",
 ];
 
 pub fn remove_hop_headers<B>(req: &mut Request<B>) {
