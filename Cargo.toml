@@ -37,5 +37,5 @@ members = [
 ]
 
 [workspace.dependencies]
-tokio = "1.38.0"
+tokio = "1.41.0"
 tracing = "0.1.40"

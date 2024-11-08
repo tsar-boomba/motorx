@@ -13,37 +13,37 @@ description = "Build your own motorx binary."
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-http-body = "1.0.0"
+http-body = "1.0.1"
 http-body-util = "0.1.2"
-bytes = "1.6.0"
+bytes = "1.8.0"
 http = "1.1.0"
-regex = "1.10.5"
-once_cell = { version = "1.19.0", features = ["parking_lot"] }
-thiserror = "1.0.61"
+regex = "1.11.1"
+once_cell = { version = "1.20.2", features = ["parking_lot"] }
+thiserror = "2.0.0"
 tokio = { workspace = true, features = ["net", "rt", "macros", "parking_lot"] }
-hyper = { version = "1.3.1", features = ["full"] }
-hyper-util = { version = "0.1.5", features = ["tokio", "http1", "http2", "server"] }
+hyper = { version = "1.5.0", features = ["full"] }
+hyper-util = { version = "0.1.10", features = ["tokio", "http1", "http2", "server"] }
 
 # logging feature
 tracing = { workspace = true, optional = true }
 
 # tls feature
-rustls-native-certs = { version = "0.7.0", optional = true }
-rustls = { version = "0.23.10", default-features = false, optional = true }
-rustls-pemfile = { version = "2.1.2", optional = true }
+rustls-native-certs = { version = "0.8.0", optional = true }
+rustls = { version = "0.23.16", default-features = false, optional = true }
+rustls-pemfile = { version = "2.2.0", optional = true }
 tokio-rustls = { version = "0.26.0", default-features = false, optional = true  }
-webpki-roots = { version = "0.26.2", optional = true }
-futures-util = { version = "0.3.30", optional = true }
+webpki-roots = { version = "0.26.6", optional = true }
+futures-util = { version = "0.3.31", optional = true }
 
 # json-config feature
-serde = { version = "1.0.203", features = ["derive"], optional = true }
-serde_json = { version = "1.0.117", optional = true }
+serde = { version = "1.0.214", features = ["derive"], optional = true }
+serde_json = { version = "1.0.132", optional = true }
 http-serde = { version = "2.1.1", optional = true }
 itertools = "0.13.0"
-tokio-util = "0.7.11"
+tokio-util = "0.7.12"
 
 [dev-dependencies]
-reqwest = "0.12.4" # to send request to proxy in tests
+reqwest = "0.12.9" # to send request to proxy in tests
 tokio = { workspace = true, features = ["full"] }
 tracing-subscriber = { version = "0.3.18", features = ["env-filter"] }
 

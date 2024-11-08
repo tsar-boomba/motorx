@@ -2,15 +2,15 @@
 //! # Motorx
 //! ## Basic usage
 //!
-//! ```
+//! ```ignore
 //! #[tokio::main]
 //! async fn main() {
 //!     // Register a tracing subscriber for logging
 //!
 //!     let server = motorx_core::Server::new(motorx_core::Config { /* Your config here */ });
 //!
-//!     // start polling and proxying requests
-//!     server.await.unwrap()
+//!     // Start the server
+//!     server.run().await.unwrap()
 //! }
 //! ```
 
@@ -30,12 +30,12 @@ pub mod tls;
 #[cfg(feature = "logging")]
 extern crate tracing;
 
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
-use std::task::ready;
 
-use cache::init_caches;
-use conn_pool::init_conn_pools;
+use cache::Cache;
+use conn_pool::{ConnPool, ConnPools};
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::Request;
@@ -46,16 +46,15 @@ use rustls::ServerConfig;
 use tls::stream::TlsStream;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 
 pub use config::{CacheSettings, Config, Rule};
 pub use error::Error;
-use tokio_util::sync::PollSemaphore;
 
 /// Motorx proxy server
 ///
 /// Usage:
-/// ```
+/// ```ignore
 /// #[tokio::main]
 /// async fn main() {
 ///     // Register a tracing subscriber for logging
@@ -63,12 +62,14 @@ use tokio_util::sync::PollSemaphore;
 ///     let server = motorx_core::Server::new(motorx_core::Config { /* Your config here */ });
 ///
 ///     // start polling and proxying requests
-///     server.await.unwrap()
+///     server.run().await.unwrap()
 /// }
 /// ```
 #[must_use = "Server does nothing unless it is `.await`ed"]
 pub struct Server {
     config: Arc<Config>,
+    cache: Arc<Cache>,
+    conn_pools: Arc<ConnPools>,
     listener: TcpListener,
     /// Used to enforce max num of connections to this server
     semaphore: Arc<Semaphore>,
@@ -78,9 +79,16 @@ pub struct Server {
 
 impl Server {
     /// Do configuration shared between raw and tls servers
-    fn common_config(mut config: Config) -> (Arc<Config>, TcpListener) {
-        init_conn_pools(&config);
-        init_caches(&config);
+    fn common_config(mut config: Config) -> (Arc<Config>, Arc<Cache>, Arc<ConnPools>, TcpListener) {
+        let conn_pools = Arc::new(HashMap::from_iter(config.upstreams.values().map(
+            |upstream| {
+                (
+                    upstream.addr.clone(),
+                    Mutex::new(ConnPool::new(upstream.max_connections)),
+                )
+            },
+        )));
+        let cache = Arc::new(Cache::from_config(&config));
 
         config.rules.sort_by(|a, b| a.path.cmp(&b.path));
         let config = Arc::new(config);
@@ -89,24 +97,22 @@ impl Server {
 
         let listener = tcp_listener(config.addr).unwrap();
 
-        (config, listener)
+        (config, cache, conn_pools, listener)
     }
 
     pub fn new(config: Config) -> Self {
-        let (config, listener) = Self::common_config(config);
+        let (config, cache, conn_pools, listener) = Self::common_config(config);
 
         cfg_logging! {
             info!("Motorx proxy listening on http://{}", {
-                // TcpListener::local_addr dont work with wasmedge, so use config which may not be accurate
-                #[cfg(target_os = "wasi")]
-                {config.addr}
-                #[cfg(not(target_os = "wasi"))]
                 listener.local_addr().unwrap()
             });
         }
 
         Self {
             semaphore: Arc::new(Semaphore::new(config.max_connections)),
+            cache,
+            conn_pools,
             config,
             listener,
             #[cfg(feature = "tls")]
@@ -116,7 +122,7 @@ impl Server {
 
     #[cfg(feature = "tls")]
     pub fn new_tls(config: Config) -> Self {
-        let (config, listener) = Self::common_config(config);
+        let (config, cache, conn_pools, listener) = Self::common_config(config);
         let tls_config = {
             // Load public certificate.
             let certs = tls::load_certs(
@@ -154,6 +160,8 @@ impl Server {
 
         Self {
             semaphore: Arc::new(Semaphore::new(config.max_connections)),
+            cache,
+            conn_pools,
             config,
             listener,
             tls_config: Some(tls_config),
@@ -182,13 +190,29 @@ impl Server {
                                 tls_stream,
                                 peer_addr,
                                 Arc::clone(&self.config),
+                                Arc::clone(&self.cache),
+                                Arc::clone(&self.conn_pools),
                                 permit,
                             )
                         } else {
-                            handle_connection(stream, peer_addr, Arc::clone(&self.config), permit)
+                            handle_connection(
+                                stream,
+                                peer_addr,
+                                Arc::clone(&self.config),
+                                Arc::clone(&self.cache),
+                                Arc::clone(&self.conn_pools),
+                                permit,
+                            )
                         };
                         #[cfg(not(feature = "tls"))]
-                        handle_connection(stream, peer_addr, Arc::clone(&self.config), permit);
+                        handle_connection(
+                            stream,
+                            peer_addr,
+                            Arc::clone(&self.config),
+                            Arc::clone(&self.cache),
+                            Arc::clone(&self.conn_pools),
+                            permit,
+                        );
                     }
                     Err(e) => {
                         cfg_logging! {
@@ -201,20 +225,37 @@ impl Server {
     }
 }
 
-#[cfg_attr(feature = "logging", tracing::instrument(skip(stream, config, permit)))]
+#[cfg_attr(
+    feature = "logging",
+    tracing::instrument(skip(stream, config, cache, permit))
+)]
 fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     stream: S,
     peer_addr: SocketAddr,
     config: Arc<Config>,
+    cache: Arc<Cache>,
+    conn_pools: Arc<ConnPools>,
     permit: OwnedSemaphorePermit,
 ) {
     let service = service_fn(move |req: Request<Incoming>| {
         let config = config.clone();
+        let cache = cache.clone();
+        let conn_pools = conn_pools.clone();
+
         async move {
-            let res = handle::handle_req(req, peer_addr, Arc::clone(&config)).await;
+            let res = handle::handle_req(
+                req,
+                peer_addr,
+                Arc::clone(&config),
+                Arc::clone(&cache),
+                Arc::clone(&conn_pools),
+            )
+            .await;
+
             cfg_logging! {
                 trace!("Responded to req from {}", peer_addr);
             }
+
             res
         }
     });
@@ -241,10 +282,14 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
 
 #[inline]
 fn tcp_listener(addr: SocketAddr) -> std::io::Result<tokio::net::TcpListener> {
-    tokio::net::TcpListener::from_std(std::net::TcpListener::bind(addr)?)
+    let std_listener = std::net::TcpListener::bind(addr)?;
+    std_listener.set_nonblocking(true)?;
+    tokio::net::TcpListener::from_std(std_listener)
 }
 
 #[inline]
-async fn tcp_connect(addr: impl ToString) -> std::io::Result<tokio::net::TcpStream> {
-    tokio::net::TcpStream::connect(addr.to_string()).await
+async fn tcp_connect(
+    addr: impl tokio::net::ToSocketAddrs,
+) -> std::io::Result<tokio::net::TcpStream> {
+    tokio::net::TcpStream::connect(addr).await
 }

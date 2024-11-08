@@ -1,4 +1,4 @@
-use std::net::SocketAddr;
+use std::{net::SocketAddr, sync::Arc};
 
 use bytes::Bytes;
 use http::{header::HOST, HeaderValue, Request, Response, StatusCode};
@@ -7,10 +7,7 @@ use hyper::{body::Incoming, client, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
 
 use crate::{
-    cfg_logging,
-    config::{authentication::AuthenticationSource, Upstream},
-    conn_pool::CONN_POOLS,
-    tcp_connect, Config,
+    cfg_logging, config::{authentication::AuthenticationSource, Upstream}, conn_pool::ConnPools, tcp_connect, Config
 };
 
 pub fn add_proxy_headers<B>(req: &mut Request<B>, upstream: &Upstream, peer_addr: SocketAddr) {
@@ -136,16 +133,15 @@ pub async fn proxy_request(
     mut req: Request<Incoming>,
     upstream: &Upstream,
     peer_addr: SocketAddr,
+    conn_pools: Arc<ConnPools>,
 ) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {
-    let mut conn_pool = CONN_POOLS
-        .get()
-        .unwrap()
+    let mut conn_pool = conn_pools
         .get(&upstream.addr)
         .unwrap()
         .lock()
         .await;
 
-    let (queue, mut sender) = match conn_pool.get_sender(upstream).await {
+    let mut conn = match conn_pool.get_sender(upstream).await {
         Ok(senders) => senders,
         Err(_) => {
             cfg_logging! {error!("Failed to connect to {}", upstream.addr);}
@@ -158,7 +154,7 @@ pub async fn proxy_request(
     drop(conn_pool);
 
     // wait for conn to be ready, if it closes return a error
-    if let Err(_) = sender.ready().await {
+    if let Err(_) = conn.ready().await {
         cfg_logging! {error!("Connection to {} was unexpectedly closed.", upstream.addr);}
         return Ok(Response::builder()
             .status(StatusCode::BAD_GATEWAY)
@@ -173,10 +169,10 @@ pub async fn proxy_request(
         debug!("Proxying request: {:?}", req);
     }
 
-    let resp = sender.send_request(req).await?;
+    let resp = conn.send_request(req).await?;
 
-    // channel will never be closed, so this is safe
-    queue.send(sender).await.unwrap();
+    // Dropping a pooled connection returns it to the pool
+    drop(conn);
 
     Ok(resp.map(|b| b.map_err(|e| e.into()).boxed()))
 }
@@ -190,8 +186,8 @@ pub(crate) async fn authenticate<B>(
     req: &Request<B>,
 ) -> Result<Option<Response<BoxBody<Bytes, crate::Error>>>, crate::Error> {
     let Some(authentication) = &upstream.authentication else {
-            return Ok(None);
-        };
+        return Ok(None);
+    };
 
     if authentication
         .exclude
@@ -228,7 +224,7 @@ pub(crate) async fn authenticate<B>(
 
     // TODO in the future, somehow (idk how) use existing conn pool for this
     cfg_logging! {info!("Opened new connection to: {}", upstream.addr);}
-    let stream = tcp_connect(auth_upstream.addr.authority().unwrap()).await?;
+    let stream = tcp_connect(auth_upstream.addr.authority().unwrap().as_str()).await?;
     let (mut sender, conn) = client::conn::http1::Builder::new()
         .preserve_header_case(true)
         .title_case_headers(true)

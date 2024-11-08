@@ -8,21 +8,23 @@ use bytes::Bytes;
 use http_body_util::combinators::BoxBody;
 use hyper::{body::Incoming, Method, StatusCode};
 use hyper::{Request, Response};
-use tokio::sync::{broadcast, Mutex};
 
-use crate::cache::{Cache, CloneableRes, CACHES};
+use crate::cache::{Cache, CacheEntry, CloneableRes};
 use crate::cfg_logging;
 use crate::config::rule::Rule;
 use crate::config::{Config, Upstream};
+use crate::conn_pool::ConnPools;
 
 #[cfg_attr(
     feature = "logging",
-    tracing::instrument(level = "trace", skip(req, config))
+    tracing::instrument(level = "trace", skip(req, config, cache))
 )]
 pub(crate) async fn handle_req(
     req: Request<hyper::body::Incoming>,
     peer_addr: SocketAddr,
     config: Arc<Config>,
+    cache: Arc<Cache>,
+    conn_pools: Arc<ConnPools>,
 ) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {
     for rule in &config.rules {
         if rule.matches(&req) {
@@ -35,7 +37,16 @@ pub(crate) async fn handle_req(
                 return Ok(res);
             };
 
-            return handle_match(req, peer_addr, rule, upstream, config.max_connections).await;
+            return handle_match(
+                req,
+                peer_addr,
+                rule,
+                upstream,
+                cache,
+                conn_pools,
+                config.max_connections,
+            )
+            .await;
         }
     }
 
@@ -47,13 +58,15 @@ pub(crate) async fn handle_req(
 
 #[cfg_attr(
     feature = "logging",
-    tracing::instrument(level = "trace", skip(req, peer_addr))
+    tracing::instrument(level = "trace", skip(req, cache, peer_addr))
 )]
 async fn handle_match(
     req: Request<Incoming>,
     peer_addr: SocketAddr,
     rule: &Rule,
     upstream: &Upstream,
+    cache: Arc<Cache>,
+    conn_pools: Arc<ConnPools>,
     max_connections: usize,
 ) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {
     if Method::CONNECT == req.method() {
@@ -67,33 +80,24 @@ async fn handle_match(
     // use cache if enabled
     let refresh_cache = if let Some(cache_settings) = rule.cache.as_ref() {
         if cache_settings.methods.contains(req.method()) {
-            let rule_cache = CACHES.get().unwrap().get(rule).unwrap().read().await;
-            let cache = rule_cache.get(req.uri()).cloned();
+            let entry = cache.get_entry(rule, req.uri()).await;
 
-            // drop here so that cache hits can use a read lock (supa fast)
-            drop(rule_cache);
-
-            if let Some(cache) = cache {
+            if let Some(entry) = entry {
                 // cache found
-                let cache = cache.lock().await;
-                let Cache {
-                    cached_at,
-                    value,
+                let entry = entry.lock().await;
+                let CacheEntry {
+                    cached_at: _,
+                    value: _,
                     inflight,
-                } = &*cache;
+                } = &*entry;
 
-                if let Some(cached_at) = cached_at {
-                    if let Some(value) = value {
-                        if cached_at.elapsed() < cache_settings.max_age {
-                            // cache hit!
-                            cfg_logging! {trace!("Cache hit for {}", req.uri());}
-                            return Ok(util::from_response(value, value.body().clone()));
-                        }
-                    }
+                if let Some(cached_res) = entry.extract_fresh_data(cache_settings.max_age) {
+                    cfg_logging! {trace!("Cache hit for {}", req.uri());}
+                    return Ok(cached_res);
                 }
 
                 let inflight = inflight.as_ref().cloned();
-                drop(cache);
+                drop(entry);
 
                 if let Some(inflight) = inflight.as_ref().and_then(Weak::upgrade) {
                     // request is inflight to update cache, wait for it
@@ -109,49 +113,20 @@ async fn handle_match(
                 } else {
                     // cache needs to be updated
                     cfg_logging! {debug!("Stale cache for {}, updating...", req.uri());}
-                    let sender = Arc::new(
-                        broadcast::channel::<Option<CloneableRes<Bytes>>>(max_connections).0,
-                    );
-                    CACHES
-                        .get()
-                        .unwrap()
-                        .get(rule)
-                        .unwrap()
-                        .write()
-                        .await
-                        .insert(
-                            req.uri().clone(),
-                            Arc::new(Mutex::new(Cache {
-                                cached_at: None,
-                                value: None,
-                                inflight: Some(Arc::downgrade(&sender)),
-                            })),
-                        );
-
-                    Some(sender)
+                    Some(
+                        cache
+                            .insert_empty_entry(rule, req.uri(), max_connections)
+                            .await,
+                    )
                 }
             } else {
                 // no cache, refresh
                 cfg_logging! {debug!("No cache found for {}, creating...", req.uri());}
-                let sender =
-                    Arc::new(broadcast::channel::<Option<CloneableRes<Bytes>>>(max_connections).0);
-                CACHES
-                    .get()
-                    .unwrap()
-                    .get(rule)
-                    .unwrap()
-                    .write()
-                    .await
-                    .insert(
-                        req.uri().clone(),
-                        Arc::new(Mutex::new(Cache {
-                            cached_at: None,
-                            value: None,
-                            inflight: Some(Arc::downgrade(&sender)),
-                        })),
-                    );
-
-                Some(sender)
+                Some(
+                    cache
+                        .insert_empty_entry(rule, req.uri(), max_connections)
+                        .await,
+                )
             }
         } else {
             // method not cached
@@ -163,10 +138,10 @@ async fn handle_match(
     };
 
     let req_uri = req.uri().clone();
-    let result = util::proxy_request(req, upstream, peer_addr).await;
+    let result = util::proxy_request(req, upstream, peer_addr, conn_pools).await;
     cfg_logging! {
-                            trace!("Got res from upstream {}", peer_addr);
-                        }
+        trace!("Got res from upstream {}", peer_addr);
+    }
 
     if let Some(refresh_cache) = refresh_cache {
         match result {
@@ -176,42 +151,36 @@ async fn handle_match(
                 let cloneable = CloneableRes(cloned_res);
                 let status = cloneable.status();
 
-                let rule_cache = CACHES.get().unwrap().get(rule).unwrap();
-                if let Some(cache) = rule_cache.read().await.get(&req_uri) {
+                if let Some(entry) = cache.get_entry(rule, &req_uri).await {
                     // cache already exists
-                    let mut cache = cache.lock().await;
+                    let mut entry = entry.lock().await;
 
-                    if status.is_client_error() || status.is_server_error() {
+                    if status.is_success() {
                         // broadcast new value to waiters if not an error status
                         refresh_cache.send(Some(cloneable.clone())).ok();
+
+                        // update cache with the new response
+                        entry.cached_at = Some(Instant::now());
+                        entry.value = Some(cloneable.0);
                     } else {
                         // res was an error, dont send to waiters or cache
                         refresh_cache.send(None).ok();
                     };
 
-                    cache.cached_at = Some(Instant::now());
-                    cache.value = Some(cloneable.0);
-                    cache.inflight = None;
+                    entry.inflight = None;
                 } else {
                     // cache needs to be created
-                    let mut rule_cache = rule_cache.write().await;
-
-                    if status.is_client_error() || status.is_server_error() {
-                        // broadcast new value to waiters if not an error status
+                    if status.is_success() {
+                        // broadcast new value to waiters if successful
                         refresh_cache.send(Some(cloneable.clone())).ok();
+                        // create new cache entry
+                        cache
+                            .insert_populated_entry(rule, req_uri, cloneable.0)
+                            .await;
                     } else {
-                        // res was an error, dont send to waiters or cache
+                        // res was an error, don't send to waiters or cache
                         refresh_cache.send(None).ok();
                     };
-
-                    rule_cache.insert(
-                        req_uri,
-                        Arc::new(Mutex::new(Cache {
-                            cached_at: Some(Instant::now()),
-                            value: Some(cloneable.0),
-                            inflight: None,
-                        })),
-                    );
                 };
 
                 Ok(send_res)
@@ -221,8 +190,8 @@ async fn handle_match(
     } else {
         // Just send response
         cfg_logging! {
-                            trace!("Returning res form upstream {}", peer_addr);
-                        }
+            trace!("Returning res form upstream {}", peer_addr);
+        }
         result
     }
 }

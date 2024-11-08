@@ -7,6 +7,6 @@ macro_rules! cfg_logging {
             $(
                 $item
             )*
-        }
+        };
     }
 }

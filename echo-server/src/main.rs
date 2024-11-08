@@ -4,11 +4,14 @@ use std::net::SocketAddr;
 
 use http::Response;
 use hyper::{server, service::service_fn};
-use hyper_util::rt::tokio::{TokioIo, TokioExecutor};
+use hyper_util::rt::tokio::{TokioExecutor, TokioIo};
 
 #[tokio::main]
 async fn main() {
-    let addr: SocketAddr = std::env::args().collect::<Vec<String>>()[1]
+    let addr: SocketAddr = std::env::args()
+        .collect::<Vec<String>>()
+        .get(1)
+        .expect("Socket address argument.")
         .parse()
         .unwrap();
 
