@@ -104,6 +104,7 @@ mod de_method_vec {
                 if let Ok(method) = Method::from_str(item) {
                     methods.push(method);
                 } else {
+                    // TODO: don't use missing_field, its inaccurate
                     return Err(serde::de::Error::missing_field("Invalid method: {item:?}"));
                 };
             }
