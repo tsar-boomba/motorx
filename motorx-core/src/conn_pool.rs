@@ -121,7 +121,7 @@ impl DerefMut for PooledConn {
 impl Drop for PooledConn {
     fn drop(&mut self) {
         if let Err(err) = self.sender.try_send(self.conn.take().unwrap()) {
-            cfg_logging!{tracing::error!("Failed to send conn back to pool! {err:?}");}
+            cfg_logging! {tracing::error!("Failed to send conn back to pool! {err:?}");}
         };
     }
 }

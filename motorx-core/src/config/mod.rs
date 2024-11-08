@@ -30,7 +30,10 @@ pub struct Config {
 pub struct Upstream {
     #[cfg_attr(feature = "serde-config", serde(with = "http_serde::uri"))]
     pub addr: Uri,
-    #[cfg_attr(feature = "serde-config", serde(default = "default_upstream_max_connections"))]
+    #[cfg_attr(
+        feature = "serde-config",
+        serde(default = "default_upstream_max_connections")
+    )]
     pub max_connections: usize,
     pub authentication: Option<Authentication>,
 }

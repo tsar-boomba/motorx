@@ -7,7 +7,10 @@ use hyper::{body::Incoming, client, upgrade::Upgraded};
 use hyper_util::rt::TokioIo;
 
 use crate::{
-    cfg_logging, config::{authentication::AuthenticationSource, Upstream}, conn_pool::ConnPools, tcp_connect, Config
+    cfg_logging,
+    config::{authentication::AuthenticationSource, Upstream},
+    conn_pool::ConnPools,
+    tcp_connect, Config,
 };
 
 pub fn add_proxy_headers<B>(req: &mut Request<B>, upstream: &Upstream, peer_addr: SocketAddr) {
@@ -135,11 +138,7 @@ pub async fn proxy_request(
     peer_addr: SocketAddr,
     conn_pools: Arc<ConnPools>,
 ) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {
-    let mut conn_pool = conn_pools
-        .get(&upstream.addr)
-        .unwrap()
-        .lock()
-        .await;
+    let mut conn_pool = conn_pools.get(&upstream.addr).unwrap().lock().await;
 
     let mut conn = match conn_pool.get_sender(upstream).await {
         Ok(senders) => senders,
