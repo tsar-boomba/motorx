@@ -15,7 +15,6 @@ async fn test() {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
     let mut upstreams = HashMap::new();
-    println!("create upstream");
     let mut upstream = TestUpstream::new_http1(|_| async move {
         Response::builder().body(Empty::new().boxed()).unwrap()
     })

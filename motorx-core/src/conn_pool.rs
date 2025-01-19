@@ -22,7 +22,6 @@ use crate::{cfg_logging, config::Upstream, tcp_connect};
 
 // TODO: consider using better hash algorithm
 // TODO: use SocketAddr as key instead of Uri (more efficient hash impl)
-// TODO: consider making this non-static part of Server
 pub(crate) type ConnPools = HashMap<Uri, Mutex<ConnPool>>;
 
 /// Handler asks for sender (ConnPool::get_sender)

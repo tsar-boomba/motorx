@@ -13,7 +13,7 @@ use crate::{
     tcp_connect, Config,
 };
 
-pub fn add_proxy_headers<B>(req: &mut Request<B>, upstream: &Upstream, peer_addr: SocketAddr) {
+pub(crate) fn add_proxy_headers<B>(req: &mut Request<B>, upstream: &Upstream, peer_addr: SocketAddr) {
     let proto = req.uri().scheme_str().unwrap_or_default();
     let proto = if proto.is_empty() {
         proto.to_string()
@@ -76,26 +76,26 @@ const HOP_HEADERS: [&str; 8] = [
     "upgrade",
 ];
 
-pub fn remove_hop_headers<B>(req: &mut Request<B>) {
+pub(crate) fn remove_hop_headers<B>(req: &mut Request<B>) {
     let headers = req.headers_mut();
     for hop_header in HOP_HEADERS {
         headers.remove(hop_header);
     }
 }
 
-pub fn empty() -> BoxBody<Bytes, crate::Error> {
+pub(crate) fn empty() -> BoxBody<Bytes, crate::Error> {
     Empty::<Bytes>::new()
         .map_err(|never| match never {})
         .boxed()
 }
 
-pub fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, crate::Error> {
+pub(crate) fn full(chunk: impl Into<Bytes>) -> BoxBody<Bytes, crate::Error> {
     Full::new(chunk.into())
         .map_err(|never| match never {})
         .boxed()
 }
 
-pub fn from_response<T>(res: &Response<T>, body: Bytes) -> Response<BoxBody<Bytes, crate::Error>> {
+pub(crate) fn from_response<T>(res: &Response<T>, body: Bytes) -> Response<BoxBody<Bytes, crate::Error>> {
     let mut builder = Response::builder()
         .status(res.status())
         .version(res.version());
@@ -107,7 +107,7 @@ pub fn from_response<T>(res: &Response<T>, body: Bytes) -> Response<BoxBody<Byte
     builder.body(full(body)).unwrap()
 }
 
-pub async fn clone_response<T: BodyExt>(
+pub(crate) async fn clone_response<T: BodyExt>(
     res: Response<T>,
 ) -> Result<(Response<BoxBody<Bytes, crate::Error>>, Response<Bytes>), T::Error> {
     let (og_parts, og_body) = res.into_parts();
@@ -128,11 +128,11 @@ pub async fn clone_response<T: BodyExt>(
 }
 
 #[inline]
-pub async fn read_body<B: BodyExt, E>(body: B) -> Result<Bytes, B::Error> {
+pub(crate) async fn read_body<B: BodyExt, E>(body: B) -> Result<Bytes, B::Error> {
     Ok(body.collect().await?.to_bytes())
 }
 
-pub async fn proxy_request(
+pub(crate) async fn proxy_request(
     mut req: Request<Incoming>,
     upstream: &Upstream,
     peer_addr: SocketAddr,
