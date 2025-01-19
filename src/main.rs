@@ -7,5 +7,5 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Server::new(motorx::config_from_args()?)
         .run()
         .await
-        .map_err(Box::new)
+        .map_err(Into::into)
 }
