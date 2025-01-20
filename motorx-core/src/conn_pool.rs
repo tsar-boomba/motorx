@@ -4,7 +4,6 @@ use std::{
     sync::Arc,
 };
 
-use http::Uri;
 use hyper::{
     body::Incoming,
     client::{self, conn::http1::SendRequest},
@@ -21,7 +20,8 @@ use tokio::{
 use crate::{cfg_logging, config::Upstream, tcp_connect};
 
 // TODO: consider using better hash algorithm
-pub(crate) type ConnPools = HashMap<Uri, Mutex<ConnPool>>;
+/// Map of host to its associated connection pools
+pub(crate) type ConnPools = HashMap<String, ConnPool>;
 
 /// Handler asks for sender (ConnPool::get_sender)
 ///     - if mpsc::recv is first -> use existing connection
@@ -32,7 +32,7 @@ pub(crate) type ConnPools = HashMap<Uri, Mutex<ConnPool>>;
 pub(crate) struct ConnPool {
     /// Limit number of connections allowed to be opened at once
     semaphore: Arc<Semaphore>,
-    receiver: Receiver<SendRequest<Incoming>>,
+    receiver: Mutex<Receiver<SendRequest<Incoming>>>,
     /// Keep channel alive forever, send clones to handler so they can add sender back into queue
     sender: Sender<SendRequest<Incoming>>,
 }
@@ -49,21 +49,22 @@ impl ConnPool {
         ConnPool {
             semaphore: Arc::new(Semaphore::new(max_connections)),
             sender,
-            receiver,
+            receiver: Mutex::new(receiver),
         }
     }
 
     pub(crate) async fn get_sender(
-        &mut self,
+        &self,
         upstream: &Upstream,
     ) -> Result<PooledConn, crate::Error> {
         // only return if the SendRequest's underlying connection exists still
         // loop until we get a sender that meets this criteria
+        let mut receiver = self.receiver.lock().await;
         loop {
             let mut conn = select! {
                 biased;
                 // If there is a conn in the queue already, use that first
-                sender = self.receiver.recv() => {
+                sender = receiver.recv() => {
                     cfg_logging! {trace!("Reusing connection to: {}", upstream.addr);}
                     Ok::<_, crate::Error>(sender.unwrap())
                 },

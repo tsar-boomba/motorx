@@ -13,7 +13,11 @@ use crate::{
     tcp_connect, Config,
 };
 
-pub(crate) fn add_proxy_headers<B>(req: &mut Request<B>, upstream: &Upstream, peer_addr: SocketAddr) {
+pub(crate) fn add_proxy_headers<B>(
+    req: &mut Request<B>,
+    upstream: &Upstream,
+    peer_addr: SocketAddr,
+) {
     let proto = req.uri().scheme_str().unwrap_or_default();
     let proto = if proto.is_empty() {
         proto.to_string()
@@ -95,7 +99,10 @@ pub(crate) fn full(chunk: impl Into<Bytes>) -> BoxBody<Bytes, crate::Error> {
         .boxed()
 }
 
-pub(crate) fn from_response<T>(res: &Response<T>, body: Bytes) -> Response<BoxBody<Bytes, crate::Error>> {
+pub(crate) fn from_response<T>(
+    res: &Response<T>,
+    body: Bytes,
+) -> Response<BoxBody<Bytes, crate::Error>> {
     let mut builder = Response::builder()
         .status(res.status())
         .version(res.version());
@@ -137,29 +144,35 @@ pub(crate) async fn proxy_request(
     upstream: &Upstream,
     peer_addr: SocketAddr,
     conn_pools: Arc<ConnPools>,
-) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {
-    let mut conn_pool = conn_pools.get(&upstream.addr).unwrap().lock().await;
+) -> Response<BoxBody<Bytes, crate::Error>> {
+    const RETRY_COUNT: usize = 1;
+    let mut tries = 0;
+    let conn_pool = conn_pools.get(upstream.addr.host().unwrap()).unwrap();
 
-    let mut conn = match conn_pool.get_sender(upstream).await {
-        Ok(senders) => senders,
-        Err(_) => {
-            cfg_logging! {error!("Failed to connect to {}", upstream.addr);}
-            return Ok(Response::builder()
-                .status(StatusCode::BAD_GATEWAY)
-                .body(empty())
-                .unwrap());
+    let mut conn = loop {
+        if tries > RETRY_COUNT {
+            return bad_gateway();
         }
+
+        let mut conn = match conn_pool.get_sender(upstream).await {
+            Ok(senders) => senders,
+            Err(err) => {
+                cfg_logging! {error!("Failed to connect to {}: {err}", upstream.addr);}
+                tries += 1;
+                continue;
+            }
+        };
+
+        if let Err(err) = conn.ready().await {
+            cfg_logging! {error!("Connection to {} was unexpectedly closed: {err}", upstream.addr);}
+            tries += 1;
+            continue;
+        }
+
+        break conn;
     };
-    drop(conn_pool);
 
     // wait for conn to be ready, if it closes return a error
-    if let Err(_) = conn.ready().await {
-        cfg_logging! {error!("Connection to {} was unexpectedly closed.", upstream.addr);}
-        return Ok(Response::builder()
-            .status(StatusCode::BAD_GATEWAY)
-            .body(empty())
-            .unwrap());
-    }
 
     add_proxy_headers(&mut req, upstream, peer_addr);
     remove_hop_headers(&mut req);
@@ -168,12 +181,25 @@ pub(crate) async fn proxy_request(
         debug!("Proxying request: {:?}", req);
     }
 
-    let resp = conn.send_request(req).await?;
+    let resp = match conn.send_request(req).await {
+        Ok(resp) => resp,
+        Err(err) => {
+            cfg_logging! {error!("Failed to proxy request to {}: {err}", upstream.addr);};
+            return bad_gateway();
+        }
+    };
 
     // Dropping a pooled connection returns it to the pool
     drop(conn);
 
-    Ok(resp.map(|b| b.map_err(|e| e.into()).boxed()))
+    resp.map(|b| b.map_err(|e| e.into()).boxed())
+}
+
+fn bad_gateway() -> Response<BoxBody<Bytes, crate::Error>> {
+    Response::builder()
+        .status(StatusCode::BAD_GATEWAY)
+        .body(empty())
+        .unwrap()
 }
 
 /// Returning Ok(None) means no auth needed or auth succeeded

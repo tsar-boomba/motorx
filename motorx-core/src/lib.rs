@@ -46,7 +46,7 @@ use rustls::ServerConfig;
 use tls::stream::TlsStream;
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
-use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 pub use config::{CacheSettings, Config, Rule};
 pub use error::Error;
@@ -83,8 +83,8 @@ impl Server {
         let conn_pools = Arc::new(HashMap::from_iter(config.upstreams.values().map(
             |upstream| {
                 (
-                    upstream.addr.clone(),
-                    Mutex::new(ConnPool::new(upstream.max_connections)),
+                    upstream.addr.host().unwrap().to_owned(),
+                    ConnPool::new(upstream.max_connections),
                 )
             },
         )));

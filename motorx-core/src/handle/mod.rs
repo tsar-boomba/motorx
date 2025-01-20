@@ -138,60 +138,64 @@ async fn handle_match(
     };
 
     let req_uri = req.uri().clone();
-    let result = util::proxy_request(req, upstream, peer_addr, conn_pools).await;
+    let resp = util::proxy_request(req, upstream, peer_addr, conn_pools).await;
     cfg_logging! {
         trace!("Got res from upstream {}", peer_addr);
     }
 
     if let Some(refresh_cache) = refresh_cache {
-        match result {
-            Ok(res) => {
-                // read response & clone to send one and save one for cache
-                let (send_res, cloned_res) = util::clone_response(res).await?;
+        // read response & clone to send one and save one for cache
+        let status = resp.status();
+        
+        let resp = if let Some(entry) = cache.get_entry(rule, &req_uri).await {
+            // cache already exists
+            let mut entry = entry.lock().await;
+            
+            let resp = if status.is_success() {
+                // broadcast new value to waiters if not an error status
+                let (send_res, cloned_res) = util::clone_response(resp).await?;
                 let cloneable = CloneableRes(cloned_res);
-                let status = cloneable.status();
+                refresh_cache.send(Some(cloneable.clone())).ok();
 
-                if let Some(entry) = cache.get_entry(rule, &req_uri).await {
-                    // cache already exists
-                    let mut entry = entry.lock().await;
+                // update cache with the new response
+                entry.cached_at = Some(Instant::now());
+                entry.value = Some(cloneable.0);
+                send_res
+            } else {
+                // res was an error, dont send to waiters or cache
+                refresh_cache.send(None).ok();
+                resp
+            };
 
-                    if status.is_success() {
-                        // broadcast new value to waiters if not an error status
-                        refresh_cache.send(Some(cloneable.clone())).ok();
+            entry.inflight = None;
+            resp
+        } else {
+            // cache needs to be created
+            let resp = if status.is_success() {
+                let (send_res, cloned_res) = util::clone_response(resp).await?;
+                let cloneable = CloneableRes(cloned_res);
+                // broadcast new value to waiters if successful
+                refresh_cache.send(Some(cloneable.clone())).ok();
+                // create new cache entry
+                cache
+                    .insert_populated_entry(rule, req_uri, cloneable.0)
+                    .await;
+                send_res
+            } else {
+                // res was an error, don't send to waiters or cache
+                refresh_cache.send(None).ok();
+                resp
+            };
 
-                        // update cache with the new response
-                        entry.cached_at = Some(Instant::now());
-                        entry.value = Some(cloneable.0);
-                    } else {
-                        // res was an error, dont send to waiters or cache
-                        refresh_cache.send(None).ok();
-                    };
+            resp
+        };
 
-                    entry.inflight = None;
-                } else {
-                    // cache needs to be created
-                    if status.is_success() {
-                        // broadcast new value to waiters if successful
-                        refresh_cache.send(Some(cloneable.clone())).ok();
-                        // create new cache entry
-                        cache
-                            .insert_populated_entry(rule, req_uri, cloneable.0)
-                            .await;
-                    } else {
-                        // res was an error, don't send to waiters or cache
-                        refresh_cache.send(None).ok();
-                    };
-                };
-
-                Ok(send_res)
-            }
-            Err(err) => Err(err),
-        }
+        Ok(resp)
     } else {
         // Just send response
         cfg_logging! {
             trace!("Returning res form upstream {}", peer_addr);
         }
-        result
+        Ok(resp)
     }
 }
