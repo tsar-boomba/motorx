@@ -133,12 +133,13 @@ impl TestUpstream {
         requests
     }
 
-    pub fn as_upstream(&self) -> Upstream {
-        Upstream {
+    pub fn as_upstream(&self) -> Arc<Upstream> {
+        Arc::new(Upstream {
             addr: self.uri(),
             max_connections: 10,
             authentication: None,
-        }
+            key: 0,
+        })
     }
 }
 

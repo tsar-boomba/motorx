@@ -16,6 +16,8 @@ pub enum AuthenticationSource {
     Upstream {
         name: String,
         path: String,
+        #[cfg_attr(feature = "serde-config", serde(default))]
+        key: usize,
     },
     Path(String),
 }

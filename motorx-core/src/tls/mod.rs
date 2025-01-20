@@ -5,10 +5,6 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 
 pub mod stream;
 
-pub(crate) fn error(err: String) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, err)
-}
-
 // Load public certificate from file.
 pub(crate) fn load_certs(filename: &str) -> io::Result<Vec<CertificateDer<'static>>> {
     // Open certificate file.
@@ -41,4 +37,8 @@ pub(crate) fn load_private_key(filename: &str) -> io::Result<PrivateKeyDer<'stat
     }
 
     Ok(PrivateKeyDer::Pkcs1(keys.swap_remove(0)))
+}
+
+fn error(err: String) -> io::Error {
+    io::Error::new(io::ErrorKind::Other, err)
 }

@@ -30,6 +30,8 @@ async fn test() {
             match_headers: None,
             path: MatchType::Start("/".into()),
             upstream: upstream.id().to_string(),
+            cache_key: 0,
+            upstream_key: 0,
         }],
         ..Default::default()
     };

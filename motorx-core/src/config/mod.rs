@@ -4,7 +4,7 @@ pub mod rule;
 
 pub use rule::{CacheSettings, Rule};
 
-use std::{collections::HashMap, net::SocketAddr, str::FromStr};
+use std::{collections::HashMap, net::SocketAddr, str::FromStr, sync::Arc};
 
 use http::Uri;
 
@@ -17,7 +17,7 @@ pub struct Config {
     pub certs: Option<String>,
     pub private_key: Option<String>,
     pub rules: Vec<Rule>,
-    pub upstreams: HashMap<String, Upstream>,
+    pub upstreams: HashMap<String, Arc<Upstream>>,
     #[cfg_attr(
         feature = "serde-config",
         serde(default = "default_server_max_connections")
@@ -36,6 +36,9 @@ pub struct Upstream {
     )]
     pub max_connections: usize,
     pub authentication: Option<Authentication>,
+    /// Upstreams key in a slab
+    #[cfg_attr(feature = "serde-config", serde(default))]
+    pub(crate) key: usize,
 }
 
 const fn default_upstream_max_connections() -> usize {

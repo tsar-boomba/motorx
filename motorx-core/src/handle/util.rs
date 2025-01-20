@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::net::SocketAddr;
 
 use bytes::Bytes;
 use http::{header::HOST, HeaderValue, Request, Response, StatusCode};
@@ -9,8 +9,7 @@ use hyper_util::rt::TokioIo;
 use crate::{
     cfg_logging,
     config::{authentication::AuthenticationSource, Upstream},
-    conn_pool::ConnPools,
-    tcp_connect, Config,
+    tcp_connect, UpstreamAndConnPool, Upstreams,
 };
 
 pub(crate) fn add_proxy_headers<B>(
@@ -141,30 +140,28 @@ pub(crate) async fn read_body<B: BodyExt, E>(body: B) -> Result<Bytes, B::Error>
 
 pub(crate) async fn proxy_request(
     mut req: Request<Incoming>,
-    upstream: &Upstream,
+    upstream: &UpstreamAndConnPool,
     peer_addr: SocketAddr,
-    conn_pools: Arc<ConnPools>,
 ) -> Response<BoxBody<Bytes, crate::Error>> {
     const RETRY_COUNT: usize = 1;
     let mut tries = 0;
-    let conn_pool = conn_pools.get(upstream.addr.host().unwrap()).unwrap();
 
     let mut conn = loop {
         if tries > RETRY_COUNT {
             return bad_gateway();
         }
 
-        let mut conn = match conn_pool.get_sender(upstream).await {
+        let mut conn = match upstream.1.get_sender().await {
             Ok(senders) => senders,
             Err(err) => {
-                cfg_logging! {error!("Failed to connect to {}: {err}", upstream.addr);}
+                cfg_logging! {error!("Failed to connect to {}: {err}", upstream.0.addr);}
                 tries += 1;
                 continue;
             }
         };
 
         if let Err(err) = conn.ready().await {
-            cfg_logging! {error!("Connection to {} was unexpectedly closed: {err}", upstream.addr);}
+            cfg_logging! {error!("Connection to {} was unexpectedly closed: {err}", upstream.0.addr);}
             tries += 1;
             continue;
         }
@@ -174,7 +171,7 @@ pub(crate) async fn proxy_request(
 
     // wait for conn to be ready, if it closes return a error
 
-    add_proxy_headers(&mut req, upstream, peer_addr);
+    add_proxy_headers(&mut req, &upstream.0, peer_addr);
     remove_hop_headers(&mut req);
 
     cfg_logging! {
@@ -184,7 +181,7 @@ pub(crate) async fn proxy_request(
     let resp = match conn.send_request(req).await {
         Ok(resp) => resp,
         Err(err) => {
-            cfg_logging! {error!("Failed to proxy request to {}: {err}", upstream.addr);};
+            cfg_logging! {error!("Failed to proxy request to {}: {err}", upstream.0.addr);};
             return bad_gateway();
         }
     };
@@ -202,15 +199,16 @@ fn bad_gateway() -> Response<BoxBody<Bytes, crate::Error>> {
         .unwrap()
 }
 
+// TODO: test this, I don't think its correct right now
 /// Returning Ok(None) means no auth needed or auth succeeded
 /// Ok(Some) means respond with this because with failed with the upstream
 pub(crate) async fn authenticate<B>(
-    config: &Config,
-    upstream: &Upstream,
+    upstreams: &Upstreams,
+    upstream: &UpstreamAndConnPool,
     peer_addr: SocketAddr,
     req: &Request<B>,
 ) -> Result<Option<Response<BoxBody<Bytes, crate::Error>>>, crate::Error> {
-    let Some(authentication) = &upstream.authentication else {
+    let Some(authentication) = &upstream.0.authentication else {
         return Ok(None);
     };
 
@@ -227,7 +225,11 @@ pub(crate) async fn authenticate<B>(
 
     let auth_uri = match &authentication.source {
         AuthenticationSource::Path(path) => path,
-        AuthenticationSource::Upstream { name: _, path } => path,
+        AuthenticationSource::Upstream {
+            key: _,
+            name: _,
+            path,
+        } => path,
     };
     let mut auth_req_builder = Request::builder()
         .version(req.version())
@@ -239,17 +241,21 @@ pub(crate) async fn authenticate<B>(
     }
 
     let mut auth_req = auth_req_builder.body(Empty::<Bytes>::new()).unwrap();
-    add_proxy_headers(&mut auth_req, upstream, peer_addr);
+    add_proxy_headers(&mut auth_req, &upstream.0, peer_addr);
     remove_hop_headers(&mut auth_req);
 
     let auth_upstream = match &authentication.source {
-        AuthenticationSource::Path(_) => upstream,
-        AuthenticationSource::Upstream { name, path: _ } => config.upstreams.get(name).unwrap(),
+        AuthenticationSource::Path(_) => &upstream,
+        AuthenticationSource::Upstream {
+            key,
+            name: _,
+            path: _,
+        } => upstreams.get(*key).unwrap(),
     };
 
-    // TODO in the future, somehow (idk how) use existing conn pool for this
-    cfg_logging! {info!("Opened new connection to: {}", upstream.addr);}
-    let stream = tcp_connect(auth_upstream.addr.authority().unwrap().as_str()).await?;
+    // TODO: Refactor to use auth upstream's conn pool
+    cfg_logging! {info!("Opened new connection to: {}", upstream.0.addr);}
+    let stream = tcp_connect(auth_upstream.0.addr.authority().unwrap().as_str()).await?;
     let (mut sender, conn) = client::conn::http1::Builder::new()
         .preserve_header_case(true)
         .title_case_headers(true)

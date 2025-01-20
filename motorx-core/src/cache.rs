@@ -9,6 +9,7 @@ use bytes::Bytes;
 use http::Uri;
 use http_body_util::combinators::BoxBody;
 use hyper::Response;
+use slab::Slab;
 use tokio::sync::{broadcast, Mutex, RwLock};
 
 use crate::{
@@ -42,7 +43,8 @@ impl<T> Deref for CloneableRes<T> {
 
 pub(crate) struct Cache {
     // TODO: look into other synchronization than RwLock
-    cache: HashMap<Rule, RwLock<HashMap<Uri, Arc<Mutex<CacheEntry>>>>>,
+    // TODO: Use path as key to cache instead of full URI (does the URI contain important info?)
+    cache: Slab<RwLock<HashMap<Uri, Arc<Mutex<CacheEntry>>>>>,
 }
 
 // Thank you to fasterthanlime's great post about caching!
@@ -53,23 +55,27 @@ pub(crate) struct CacheEntry {
     pub(crate) cached_at: Option<Instant>,
     // TODO: allow storing the data on disk as well as in memory
     pub(crate) value: Option<Response<Bytes>>,
-    pub(crate) inflight: Option<Weak<broadcast::Sender<Option<CloneableRes<Bytes>>>>>,
+    pub(crate) inflight: Option<Weak<broadcast::Sender<Option<Arc<CloneableRes<Bytes>>>>>>,
 }
 
 impl Cache {
-    pub(crate) fn from_config(config: &Config) -> Self {
-        Self {
-            cache: HashMap::from_iter(
-                config
-                    .rules
-                    .iter()
-                    .map(|rule| (rule.clone(), RwLock::new(HashMap::new()))),
-            ),
+    pub(crate) fn from_config(config: &mut Config) -> Self {
+        let mut cache = Slab::with_capacity(config.rules.len());
+
+        for rule in &mut config.rules {
+            let entry = cache.vacant_entry();
+            let key = entry.key();
+            rule.cache_key = key;
+            entry.insert(RwLock::new(HashMap::new()));
         }
+
+        cache.shrink_to_fit();
+
+        Self { cache }
     }
 
     pub(crate) async fn get_entry(&self, rule: &Rule, uri: &Uri) -> Option<Arc<Mutex<CacheEntry>>> {
-        let rule_cache = self.cache.get(rule).unwrap();
+        let rule_cache = self.cache.get(rule.cache_key).unwrap();
         rule_cache.read().await.get(uri).cloned()
     }
 
@@ -79,24 +85,28 @@ impl Cache {
         rule: &Rule,
         uri: &Uri,
         max_connections: usize,
-    ) -> Arc<broadcast::Sender<Option<CloneableRes<Bytes>>>> {
-        // TODO: Consider sending an Option<Arc<CloneableRes>> over the channel to make sending faster (cheaper clone)
-        let sender = Arc::new(broadcast::channel::<Option<CloneableRes<Bytes>>>(max_connections).0);
+    ) -> Arc<broadcast::Sender<Option<Arc<CloneableRes<Bytes>>>>> {
+        let sender = Arc::new(broadcast::channel(max_connections).0);
 
-        self.cache.get(rule).unwrap().write().await.insert(
-            uri.clone(),
-            Arc::new(Mutex::new(CacheEntry {
-                cached_at: None,
-                value: None,
-                inflight: Some(Arc::downgrade(&sender)),
-            })),
-        );
+        self.cache
+            .get(rule.cache_key)
+            .unwrap()
+            .write()
+            .await
+            .insert(
+                uri.clone(),
+                Arc::new(Mutex::new(CacheEntry {
+                    cached_at: None,
+                    value: None,
+                    inflight: Some(Arc::downgrade(&sender)),
+                })),
+            );
 
         sender
     }
 
     pub(crate) async fn insert_populated_entry(&self, rule: &Rule, uri: Uri, res: Response<Bytes>) {
-        let rule_cache = self.cache.get(rule).unwrap();
+        let rule_cache = self.cache.get(rule.cache_key).unwrap();
         rule_cache.write().await.insert(
             uri,
             Arc::new(Mutex::new(CacheEntry {

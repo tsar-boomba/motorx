@@ -137,7 +137,7 @@
 					"requiredProperties": [],
 					"properties": {
 						"exclude": {
-							"description": "Paths to exclude from authorization (ex. /exclude, /exclude/*/with-wildcard)",
+							"description": "Paths to exclude from authentication (ex. /exclude, /exclude/*/with-wildcard)",
 							"type": "array",
 							"items": {
 								"type": "string"

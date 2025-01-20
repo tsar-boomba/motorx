@@ -30,12 +30,12 @@ pub mod tls;
 #[cfg(feature = "logging")]
 extern crate tracing;
 
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 use cache::Cache;
-use conn_pool::{ConnPool, ConnPools};
+use config::Upstream;
+use conn_pool::ConnPool;
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::Request;
@@ -50,6 +50,9 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 pub use config::{CacheSettings, Config, Rule};
 pub use error::Error;
+
+type UpstreamAndConnPool = (Arc<Upstream>, ConnPool);
+type Upstreams = Vec<UpstreamAndConnPool>;
 
 /// Motorx proxy server
 ///
@@ -69,7 +72,7 @@ pub use error::Error;
 pub struct Server {
     config: Arc<Config>,
     cache: Arc<Cache>,
-    conn_pools: Arc<ConnPools>,
+    upstreams: Arc<Upstreams>,
     listener: TcpListener,
     /// Used to enforce max num of connections to this server
     semaphore: Arc<Semaphore>,
@@ -79,16 +82,9 @@ pub struct Server {
 
 impl Server {
     /// Do configuration shared between raw and tls servers
-    fn common_config(mut config: Config) -> (Arc<Config>, Arc<Cache>, Arc<ConnPools>, TcpListener) {
-        let conn_pools = Arc::new(HashMap::from_iter(config.upstreams.values().map(
-            |upstream| {
-                (
-                    upstream.addr.host().unwrap().to_owned(),
-                    ConnPool::new(upstream.max_connections),
-                )
-            },
-        )));
-        let cache = Arc::new(Cache::from_config(&config));
+    fn common_config(mut config: Config) -> (Arc<Config>, Arc<Cache>, Arc<Upstreams>, TcpListener) {
+        let upstreams = Arc::new(init_upstreams(&mut config));
+        let cache = Arc::new(Cache::from_config(&mut config));
 
         config.rules.sort_by(|a, b| a.path.cmp(&b.path));
         let config = Arc::new(config);
@@ -97,7 +93,7 @@ impl Server {
 
         let listener = tcp_listener(config.addr).unwrap();
 
-        (config, cache, conn_pools, listener)
+        (config, cache, upstreams, listener)
     }
 
     pub fn new(config: Config) -> Self {
@@ -112,7 +108,7 @@ impl Server {
         Self {
             semaphore: Arc::new(Semaphore::new(config.max_connections)),
             cache,
-            conn_pools,
+            upstreams: conn_pools,
             config,
             listener,
             #[cfg(feature = "tls")]
@@ -161,7 +157,7 @@ impl Server {
         Self {
             semaphore: Arc::new(Semaphore::new(config.max_connections)),
             cache,
-            conn_pools,
+            upstreams: conn_pools,
             config,
             listener,
             tls_config: Some(tls_config),
@@ -191,7 +187,7 @@ impl Server {
                                 peer_addr,
                                 Arc::clone(&self.config),
                                 Arc::clone(&self.cache),
-                                Arc::clone(&self.conn_pools),
+                                Arc::clone(&self.upstreams),
                                 permit,
                             )
                         } else {
@@ -200,7 +196,7 @@ impl Server {
                                 peer_addr,
                                 Arc::clone(&self.config),
                                 Arc::clone(&self.cache),
-                                Arc::clone(&self.conn_pools),
+                                Arc::clone(&self.upstreams),
                                 permit,
                             )
                         };
@@ -234,7 +230,7 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     peer_addr: SocketAddr,
     config: Arc<Config>,
     cache: Arc<Cache>,
-    conn_pools: Arc<ConnPools>,
+    conn_pools: Arc<Upstreams>,
     permit: OwnedSemaphorePermit,
 ) {
     let service = service_fn(move |req: Request<Incoming>| {
@@ -292,4 +288,51 @@ async fn tcp_connect(
     addr: impl tokio::net::ToSocketAddrs,
 ) -> std::io::Result<tokio::net::TcpStream> {
     tokio::net::TcpStream::connect(addr).await
+}
+
+fn init_upstreams(config: &mut Config) -> Upstreams {
+    let mut upstreams = Vec::with_capacity(config.upstreams.len());
+
+    let mut upstream_order = Vec::new();
+
+    for upstream_name in config.upstreams.keys() {
+        upstream_order.push(upstream_name.clone());
+    }
+
+    for (key, upstream_name) in upstream_order.iter().enumerate() {
+        // Find any authentication referencing this upstream and populate their key
+        for (_, upstream) in &mut config.upstreams {
+            if let Some(auth) = Arc::get_mut(upstream).unwrap().authentication.as_mut() {
+                match &mut auth.source {
+                    config::authentication::AuthenticationSource::Upstream {
+                        name: _,
+                        path: _,
+                        key: upstream_key,
+                    } => *upstream_key = key,
+                    config::authentication::AuthenticationSource::Path(_) => {}
+                }
+            }
+        }
+
+        // Find any rules referencing this upstream and populate them with the key
+        for rule in &mut config.rules {
+            if rule.upstream == *upstream_name {
+                rule.upstream_key = key;
+            }
+        }
+    }
+
+    // Now, add upstreams into Vec
+    for (key, upstream_name) in upstream_order.iter().enumerate() {
+        let upstream = config.upstreams.get_mut(upstream_name).unwrap();
+        Arc::get_mut(upstream).unwrap().key = key;
+        upstreams.push((
+            Arc::clone(upstream),
+            ConnPool::new(upstream.addr.clone(), upstream.max_connections),
+        ));
+    }
+
+    upstreams.shrink_to_fit();
+
+    upstreams
 }

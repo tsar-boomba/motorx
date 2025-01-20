@@ -110,12 +110,11 @@ impl PartialOrd for MatchType {
 
 impl Display for MatchType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let string = match self {
-            MatchType::Start(path) => format!("start({})", path),
-            MatchType::Contains(pat) => format!("contains({})", pat),
-            MatchType::Regex(re) => format!("regex({})", re.as_str()),
-        };
-        write!(f, "{}", string)
+        match self {
+            MatchType::Start(path) => write!(f, "start({})", path),
+            MatchType::Contains(pat) => write!(f, "contains({})", pat),
+            MatchType::Regex(re) => write!(f, "regex({})", re.as_str()),
+        }
     }
 }
 

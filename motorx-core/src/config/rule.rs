@@ -16,6 +16,12 @@ pub struct Rule {
     pub upstream: String,
     /// Settings for caching, by providing this you opt into caching for this rule based on the methods provided in `cache_methods` (defaults to ['GET'])
     pub cache: Option<CacheSettings>,
+    /// Key into Slab containing cache for this rule
+    #[cfg_attr(feature = "serde-config", serde(default))]
+    pub(crate) cache_key: usize,
+    /// Key into Slab containing upstreams
+    #[cfg_attr(feature = "serde-config", serde(default))]
+    pub(crate) upstream_key: usize,
 }
 
 impl Rule {
@@ -28,15 +34,16 @@ impl Rule {
 
         if let Some(headers) = self.match_headers.as_ref() {
             for (header, pattern) in headers {
-                if !pattern
-                    .matches(
-                        req.headers()
-                            .get(header)
-                            .map(|h| h.to_str().unwrap_or_default())
-                            .unwrap_or_default(),
-                    )
-                    .is_match()
-                {
+                if let Some(header_in_req) = req.headers().get(header) {
+                    // TODO: handle non-utf8 header values
+                    if !pattern
+                        .matches(header_in_req.to_str().unwrap_or_default())
+                        .is_match()
+                    {
+                        return false;
+                    }
+                } else {
+                    // Header not present in request, but needed by rule
                     return false;
                 }
             }

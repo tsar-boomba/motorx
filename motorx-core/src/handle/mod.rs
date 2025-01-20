@@ -10,10 +10,9 @@ use hyper::{body::Incoming, Method, StatusCode};
 use hyper::{Request, Response};
 
 use crate::cache::{Cache, CacheEntry, CloneableRes};
-use crate::cfg_logging;
+use crate::{cfg_logging, UpstreamAndConnPool, Upstreams};
 use crate::config::rule::Rule;
-use crate::config::{Config, Upstream};
-use crate::conn_pool::ConnPools;
+use crate::config::Config;
 
 #[cfg_attr(
     feature = "logging",
@@ -24,14 +23,14 @@ pub(crate) async fn handle_req(
     peer_addr: SocketAddr,
     config: Arc<Config>,
     cache: Arc<Cache>,
-    conn_pools: Arc<ConnPools>,
+    upstreams: Arc<Upstreams>,
 ) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {
     for rule in &config.rules {
         if rule.matches(&req) {
-            let upstream = config.upstreams.get(&rule.upstream).expect("`upstream` in a rule should match a key in the `upstreams` property at the root of the config.");
+            let upstream = upstreams.get(rule.upstream_key).expect("`upstream` in a rule should match a key in the `upstreams` property at the root of the config.");
 
             // handle authentication if necessary
-            let auth_res = util::authenticate(&*config, upstream, peer_addr, &req).await?;
+            let auth_res = util::authenticate(&upstreams, upstream, peer_addr, &req).await?;
 
             if let Some(res) = auth_res {
                 return Ok(res);
@@ -43,7 +42,7 @@ pub(crate) async fn handle_req(
                 rule,
                 upstream,
                 cache,
-                conn_pools,
+                &upstreams,
                 config.max_connections,
             )
             .await;
@@ -64,9 +63,9 @@ async fn handle_match(
     req: Request<Incoming>,
     peer_addr: SocketAddr,
     rule: &Rule,
-    upstream: &Upstream,
+    upstream: &UpstreamAndConnPool,
     cache: Arc<Cache>,
-    conn_pools: Arc<ConnPools>,
+    upstreams: &Upstreams,
     max_connections: usize,
 ) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {
     if Method::CONNECT == req.method() {
@@ -105,7 +104,8 @@ async fn handle_match(
 
                     // dont hold lock while waiting for inflight
                     if let Ok(Some(res)) = inflight.subscribe().recv().await {
-                        return Ok(res.0.map(|b| util::full(b)));
+                        // Clone the inner response and use it
+                        return Ok((*res).clone().0.map(|b| util::full(b)));
                     } else {
                         // inflight request failed, proceed as if caching was disabled
                         None
@@ -138,7 +138,7 @@ async fn handle_match(
     };
 
     let req_uri = req.uri().clone();
-    let resp = util::proxy_request(req, upstream, peer_addr, conn_pools).await;
+    let resp = util::proxy_request(req, upstream, peer_addr).await;
     cfg_logging! {
         trace!("Got res from upstream {}", peer_addr);
     }
@@ -146,16 +146,16 @@ async fn handle_match(
     if let Some(refresh_cache) = refresh_cache {
         // read response & clone to send one and save one for cache
         let status = resp.status();
-        
+
         let resp = if let Some(entry) = cache.get_entry(rule, &req_uri).await {
             // cache already exists
             let mut entry = entry.lock().await;
-            
+
             let resp = if status.is_success() {
                 // broadcast new value to waiters if not an error status
                 let (send_res, cloned_res) = util::clone_response(resp).await?;
                 let cloneable = CloneableRes(cloned_res);
-                refresh_cache.send(Some(cloneable.clone())).ok();
+                refresh_cache.send(Some(Arc::new(cloneable.clone()))).ok();
 
                 // update cache with the new response
                 entry.cached_at = Some(Instant::now());
@@ -175,7 +175,7 @@ async fn handle_match(
                 let (send_res, cloned_res) = util::clone_response(resp).await?;
                 let cloneable = CloneableRes(cloned_res);
                 // broadcast new value to waiters if successful
-                refresh_cache.send(Some(cloneable.clone())).ok();
+                refresh_cache.send(Some(Arc::new(cloneable.clone()))).ok();
                 // create new cache entry
                 cache
                     .insert_populated_entry(rule, req_uri, cloneable.0)

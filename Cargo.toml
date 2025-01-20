@@ -22,13 +22,15 @@ pre-release-hook = ["./tools/changelog.sh"]
 
 [dependencies]
 motorx-core = { path = "motorx-core", version = "0.0.10", features = ["full"] }
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "fmt", "parking_lot"] }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt", "parking_lot"] }
 tracing = { workspace = true }
 
 tokio = { workspace = true, features = ["rt", "macros", "rt-multi-thread"] }
 
 [profile.release]
 #debug = true
+codegen-units = 1
+lto = "fat"
 
 [workspace]
 members = [
@@ -37,5 +39,5 @@ members = [
 ]
 
 [workspace.dependencies]
-tokio = "1.41.0"
-tracing = "0.1.40"
+tokio = "1.43.0"
+tracing = "0.1.41"

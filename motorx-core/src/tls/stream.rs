@@ -41,6 +41,8 @@ impl AsyncRead for TlsStream {
         match pin.state {
             State::Handshaking(ref mut accept) => match ready!(Pin::new(accept).poll(cx)) {
                 Ok(mut stream) => {
+                    // When handshake is done, do first poll on stream and switch state to streaming for
+                    // future polls
                     let result = Pin::new(&mut stream).poll_read(cx, buf);
                     pin.state = State::Streaming(stream);
                     result
@@ -62,6 +64,8 @@ impl AsyncWrite for TlsStream {
         match pin.state {
             State::Handshaking(ref mut accept) => match ready!(Pin::new(accept).poll(cx)) {
                 Ok(mut stream) => {
+                    // When handshake is done, do first poll on stream and switch state to streaming for
+                    // future polls
                     let result = Pin::new(&mut stream).poll_write(cx, buf);
                     pin.state = State::Streaming(stream);
                     result

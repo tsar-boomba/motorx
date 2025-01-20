@@ -1,14 +1,15 @@
 use std::{
-    collections::HashMap,
     ops::{Deref, DerefMut},
     sync::Arc,
 };
 
+use http::Uri;
 use hyper::{
     body::Incoming,
     client::{self, conn::http1::SendRequest},
 };
 use hyper_util::rt::TokioIo;
+use slab::Slab;
 use tokio::{
     select,
     sync::{
@@ -17,11 +18,10 @@ use tokio::{
     },
 };
 
-use crate::{cfg_logging, config::Upstream, tcp_connect};
+use crate::{cfg_logging, tcp_connect};
 
-// TODO: consider using better hash algorithm
-/// Map of host to its associated connection pools
-pub(crate) type ConnPools = HashMap<String, ConnPool>;
+/// Slab of host to its associated connection pools
+pub(crate) type ConnPools = Slab<ConnPool>;
 
 /// Handler asks for sender (ConnPool::get_sender)
 ///     - if mpsc::recv is first -> use existing connection
@@ -35,6 +35,7 @@ pub(crate) struct ConnPool {
     receiver: Mutex<Receiver<SendRequest<Incoming>>>,
     /// Keep channel alive forever, send clones to handler so they can add sender back into queue
     sender: Sender<SendRequest<Incoming>>,
+    uri: Uri,
 }
 
 #[derive(Debug)]
@@ -44,19 +45,17 @@ pub(crate) struct PooledConn {
 }
 
 impl ConnPool {
-    pub(crate) fn new(max_connections: usize) -> Self {
+    pub(crate) fn new(uri: Uri, max_connections: usize) -> Self {
         let (sender, receiver) = mpsc::channel::<SendRequest<Incoming>>(max_connections);
         ConnPool {
             semaphore: Arc::new(Semaphore::new(max_connections)),
             sender,
             receiver: Mutex::new(receiver),
+            uri,
         }
     }
 
-    pub(crate) async fn get_sender(
-        &self,
-        upstream: &Upstream,
-    ) -> Result<PooledConn, crate::Error> {
+    pub(crate) async fn get_sender(&self) -> Result<PooledConn, crate::Error> {
         // only return if the SendRequest's underlying connection exists still
         // loop until we get a sender that meets this criteria
         let mut receiver = self.receiver.lock().await;
@@ -65,14 +64,14 @@ impl ConnPool {
                 biased;
                 // If there is a conn in the queue already, use that first
                 sender = receiver.recv() => {
-                    cfg_logging! {trace!("Reusing connection to: {}", upstream.addr);}
+                    cfg_logging! {trace!("Reusing connection to: {}", self.uri);}
                     Ok::<_, crate::Error>(sender.unwrap())
                 },
                 // Otherwise, check if new connections are allowed to be opened
                 permit = Arc::clone(&self.semaphore).acquire_owned() => {
                     let permit = permit.unwrap();
-                    cfg_logging! {info!("Opened new connection to: {}", upstream.addr);}
-                    let stream = tcp_connect(upstream.addr.authority().unwrap().as_str()).await?;
+                    cfg_logging! {info!("Opened new connection to: {}", self.uri);}
+                    let stream = tcp_connect(self.uri.authority().unwrap().as_str()).await?;
                     let (sender, conn) = client::conn::http1::Builder::new()
                         .preserve_header_case(true)
                         .title_case_headers(true)
