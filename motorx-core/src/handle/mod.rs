@@ -10,9 +10,9 @@ use hyper::{body::Incoming, Method, StatusCode};
 use hyper::{Request, Response};
 
 use crate::cache::{Cache, CacheEntry, CloneableRes};
-use crate::{cfg_logging, UpstreamAndConnPool, Upstreams};
 use crate::config::rule::Rule;
 use crate::config::Config;
+use crate::{cfg_logging, UpstreamAndConnPool, Upstreams};
 
 #[cfg_attr(
     feature = "logging",

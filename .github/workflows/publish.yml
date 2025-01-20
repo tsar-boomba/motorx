@@ -27,7 +27,13 @@ jobs:
         with:
             profile: minimal
             toolchain: stable
-      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - uses: Swatinem/rust-cache@c5ed9ba6b7e1bb8aff90d43acd2f0af4990fa57c
+      - name: Test
+        uses: actions-rs/cargo@v1
+        with:
+          command: nextest
+          args: run --all-features --workspace
       - name: Install cargo-release
         uses: taiki-e/install-action@v1
         with:
@@ -38,4 +44,4 @@ jobs:
       # - name: Cargo Release motorx-core and bin
       #   env:
       #     CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_TOKEN }}
-      #   run: cargo release --allow-branch main -features tls,serde-config,logging --tag-name 'v{{version}}' -v -x ${{ inputs.version }}
+      #   run: cargo release --allow-branch main --features tls,serde-config,logging --tag-name 'v{{version}}' -v -x ${{ inputs.version }}

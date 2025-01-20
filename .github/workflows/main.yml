@@ -33,7 +33,12 @@ jobs:
         with:
             toolchain: stable
             profile: minimal
-      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      - uses: Swatinem/rust-cache@c5ed9ba6b7e1bb8aff90d43acd2f0af4990fa57c
+      - uses: taiki-e/install-action@nextest
       - name: Run Tests
-        run: cargo test --workspace
+        uses: actions-rs/cargo@v1
+        with:
+          command: nextest
+          args: run --all-features --workspace
   
