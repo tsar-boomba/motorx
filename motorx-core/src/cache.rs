@@ -44,6 +44,7 @@ impl<T> Deref for CloneableRes<T> {
 pub(crate) struct Cache {
     // TODO: look into other synchronization than RwLock
     // TODO: Use path as key to cache instead of full URI (does the URI contain important info?)
+    // TODO: Replace Slab with Vec (basically the same thing)
     cache: Slab<RwLock<HashMap<Uri, Arc<Mutex<CacheEntry>>>>>,
 }
 

@@ -1,11 +1,13 @@
 use std::{
     convert::Infallible,
     future::Future,
+    io::Write,
     net::SocketAddr,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
     },
+    time::Duration,
 };
 
 use bytes::Bytes;
@@ -13,6 +15,9 @@ use http::{request::Parts, Request, Response, Uri};
 use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::{body::Incoming, service::service_fn};
 use hyper_util::rt::TokioIo;
+use rcgen::{CertificateParams, KeyPair};
+use reqwest::Certificate;
+use tempfile::NamedTempFile;
 use tokio::{net::TcpListener, select, sync::mpsc};
 
 use crate::config::Upstream;
@@ -48,12 +53,10 @@ impl TestUpstream {
 
             async move {
                 loop {
-                    println!("[upstream] accept loop!");
                     select! {
                         res = socket.accept() => {
                             match res {
                                 Ok((stream, _)) => {
-                                    println!("[upstream] accepted conn!");
                                     connections_accepted.fetch_add(1, Ordering::Relaxed);
 
                                     let service = service_fn({
@@ -61,7 +64,6 @@ impl TestUpstream {
                                         let req_handler = req_handler.clone();
 
                                         move |req: Request<Incoming>| {
-                                            println!("[upstream] Serving req");
                                             let requests_sender = requests_sender.clone();
                                             let req_handler = req_handler.clone();
                                             async move {
@@ -69,7 +71,6 @@ impl TestUpstream {
                                                 let body_bytes = body.collect().await.unwrap().to_bytes();
                                                 let res = req_handler(&head).await;
                                                 requests_sender.send(Request::from_parts(head, body_bytes)).await.unwrap();
-                                                println!("[upstream] Responded");
                                                 Ok::<_, Infallible>(res)
                                             }
                                         }
@@ -147,4 +148,38 @@ impl Drop for TestUpstream {
     fn drop(&mut self) {
         self.cancel_server_task.try_send(()).ok();
     }
+}
+
+fn base_client() -> reqwest::ClientBuilder {
+    reqwest::ClientBuilder::new().timeout(Duration::from_secs(1))
+}
+
+pub fn client() -> reqwest::Client {
+    base_client().build().unwrap()
+}
+
+pub fn tls_client(cert_pem: String) -> reqwest::Client {
+    base_client()
+        .add_root_certificate(Certificate::from_pem(cert_pem.as_bytes()).unwrap())
+        .build()
+        .unwrap()
+}
+
+pub fn gen_self_signed() -> (NamedTempFile, NamedTempFile) {
+    let key_pair = KeyPair::generate().unwrap();
+    let cert = CertificateParams::new(["localhost".into()])
+        .unwrap()
+        .self_signed(&key_pair)
+        .unwrap();
+
+    let mut cert_file = NamedTempFile::new().unwrap();
+    cert_file.write_all(cert.pem().as_bytes()).unwrap();
+
+    let mut key_file = NamedTempFile::new().unwrap();
+    println!("{}", key_pair.serialize_pem());
+    key_file
+        .write_all(key_pair.serialize_pem().trim().as_bytes())
+        .unwrap();
+
+    (cert_file, key_file)
 }

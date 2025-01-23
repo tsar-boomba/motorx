@@ -17,6 +17,10 @@ pub(crate) fn load_certs(filename: &str) -> io::Result<Vec<CertificateDer<'stati
         .try_collect::<_, Vec<_>, _>()
         .map_err(|e| error(e.to_string()))?;
 
+    if certs.len() < 1 {
+        return Err(error("Cannot have empty certs.".into()));
+    }
+
     Ok(certs)
 }
 
@@ -27,16 +31,12 @@ pub(crate) fn load_private_key(filename: &str) -> io::Result<PrivateKeyDer<'stat
         .map_err(|e| error(format!("failed to open {}: {}", filename, e)))?;
     let mut reader = io::BufReader::new(keyfile);
 
+    // TODO: migrate to rustls-pki-types
     // Load and return a single private key.
-    let mut keys = rustls_pemfile::rsa_private_keys(&mut reader)
-        .try_collect::<_, Vec<_>, _>()
-        .map_err(|e| error(e.to_string()))?;
+    let key = rustls_pemfile::private_key(&mut reader)?
+        .ok_or_else(|| error("Missing private key".into()))?;
 
-    if keys.len() != 1 {
-        return Err(error("expected a single private key".into()));
-    }
-
-    Ok(PrivateKeyDer::Pkcs1(keys.swap_remove(0)))
+    Ok(key)
 }
 
 fn error(err: String) -> io::Error {

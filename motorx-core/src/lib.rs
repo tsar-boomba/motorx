@@ -51,6 +51,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 pub use config::{CacheSettings, Config, Rule};
 pub use error::Error;
 
+// TODO: Consider Boxing this (Or just ConnPool) to improve spacial locality
 type UpstreamAndConnPool = (Arc<Upstream>, ConnPool);
 type Upstreams = Vec<UpstreamAndConnPool>;
 
@@ -68,7 +69,6 @@ type Upstreams = Vec<UpstreamAndConnPool>;
 ///     server.run().await.unwrap()
 /// }
 /// ```
-#[must_use = "Server does nothing unless it is `.await`ed"]
 pub struct Server {
     config: Arc<Config>,
     cache: Arc<Cache>,

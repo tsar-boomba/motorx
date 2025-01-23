@@ -20,9 +20,6 @@ use tokio::{
 
 use crate::{cfg_logging, tcp_connect};
 
-/// Slab of host to its associated connection pools
-pub(crate) type ConnPools = Slab<ConnPool>;
-
 /// Handler asks for sender (ConnPool::get_sender)
 ///     - if mpsc::recv is first -> use existing connection
 ///     - else (whichever is first):
