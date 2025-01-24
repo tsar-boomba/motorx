@@ -6,7 +6,8 @@
 
 - Robust configuration & request filtering
 - Caching
-- Wasm/wasi through wasmedge
+- http2
+- tls
 
 ## Usage
 
@@ -24,10 +25,9 @@ Build your own binary
 
 ### Crate Features
 
-- `tracing`: Emit log information through `tracing` crate
+- `logging`: Emit log information through `tracing` crate
 - `serde-config`: Implements `serde::Deserialize` for config structs
-- `tls`: Adds tls support through `rustls` (not yet tested)
-- `wasm`: no-default-features only, allows compilation for wasm32-wasi and running in wasmedge
+- `tls`: Adds tls support through `rustls`
 
 ## Contributing
 
