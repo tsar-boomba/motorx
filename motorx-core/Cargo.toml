@@ -49,6 +49,7 @@ tokio = { workspace = true, features = ["full"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 rcgen = { version = "0.13.2" }
 tempfile = "3.15.0"
+maplit = "1.0.2"
 
 [features]
 full = ["logging", "serde-config", "tls"]

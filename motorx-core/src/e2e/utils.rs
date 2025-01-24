@@ -4,7 +4,7 @@ use std::{
     io::Write,
     net::SocketAddr,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         Arc,
     },
     time::Duration,
@@ -19,8 +19,12 @@ use rcgen::{CertificateParams, KeyPair};
 use reqwest::Certificate;
 use tempfile::NamedTempFile;
 use tokio::{net::TcpListener, select, sync::mpsc};
+use tracing_subscriber::EnvFilter;
 
-use crate::config::Upstream;
+use crate::{
+    config::{match_type::MatchType, Upstream},
+    Rule,
+};
 
 static ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
@@ -30,7 +34,7 @@ pub struct TestUpstream {
     socket_addr: SocketAddr,
     connections_accepted: Arc<AtomicUsize>,
     connections_failed_to_accept: Arc<AtomicUsize>,
-    requests_receiver: mpsc::Receiver<Request<Bytes>>,
+    requests_receiver: mpsc::UnboundedReceiver<Request<Bytes>>,
 }
 
 impl TestUpstream {
@@ -43,7 +47,7 @@ impl TestUpstream {
         let socket = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let socket_addr = socket.local_addr().unwrap();
         let (cancel_server_task, mut recv_cancel) = mpsc::channel(1);
-        let (requests_sender, requests_receiver) = mpsc::channel(128);
+        let (requests_sender, requests_receiver) = mpsc::unbounded_channel();
         let connections_accepted = Arc::new(AtomicUsize::new(0));
         let connections_failed_to_accept = Arc::new(AtomicUsize::new(0));
 
@@ -70,7 +74,7 @@ impl TestUpstream {
                                                 let (head, body) = req.into_parts();
                                                 let body_bytes = body.collect().await.unwrap().to_bytes();
                                                 let res = req_handler(&head).await;
-                                                requests_sender.send(Request::from_parts(head, body_bytes)).await.unwrap();
+                                                requests_sender.send(Request::from_parts(head, body_bytes)).unwrap();
                                                 Ok::<_, Infallible>(res)
                                             }
                                         }
@@ -150,7 +154,28 @@ impl Drop for TestUpstream {
     }
 }
 
-fn base_client() -> reqwest::ClientBuilder {
+pub fn tracing() {
+    static INITIALIZED: AtomicBool = AtomicBool::new(false);
+
+    if !INITIALIZED.swap(true, Ordering::Relaxed) {
+        tracing_subscriber::fmt()
+            .with_env_filter(EnvFilter::from_default_env())
+            .init();
+    }
+}
+
+pub fn start_rule(starts_with: &str, upstream: &TestUpstream) -> Rule {
+    Rule {
+        path: MatchType::Start(starts_with.into()),
+        match_headers: None,
+        upstream: upstream.id().to_string(),
+        cache: None,
+        cache_key: 0,
+        upstream_key: 0,
+    }
+}
+
+pub fn base_client() -> reqwest::ClientBuilder {
     reqwest::ClientBuilder::new().timeout(Duration::from_secs(1))
 }
 
@@ -158,14 +183,31 @@ pub fn client() -> reqwest::Client {
     base_client().build().unwrap()
 }
 
+pub fn http2_client() -> reqwest::Client {
+    base_client().http2_prior_knowledge().build().unwrap()
+}
+
+pub fn base_tls_client(cert_pem: String) -> reqwest::ClientBuilder {
+    base_client().add_root_certificate(Certificate::from_pem(cert_pem.as_bytes()).unwrap())
+}
+
 pub fn tls_client(cert_pem: String) -> reqwest::Client {
-    base_client()
-        .add_root_certificate(Certificate::from_pem(cert_pem.as_bytes()).unwrap())
+    base_tls_client(cert_pem).build().unwrap()
+}
+
+pub fn http2_tls_client(cert_pem: String) -> reqwest::Client {
+    base_tls_client(cert_pem)
+        .http2_prior_knowledge()
         .build()
         .unwrap()
 }
 
-pub fn gen_self_signed() -> (NamedTempFile, NamedTempFile) {
+pub struct CertKeyFiles {
+    pub cert_file: NamedTempFile,
+    pub key_file: NamedTempFile,
+}
+
+pub fn gen_self_signed() -> CertKeyFiles {
     let key_pair = KeyPair::generate().unwrap();
     let cert = CertificateParams::new(["localhost".into()])
         .unwrap()
@@ -181,5 +223,8 @@ pub fn gen_self_signed() -> (NamedTempFile, NamedTempFile) {
         .write_all(key_pair.serialize_pem().trim().as_bytes())
         .unwrap();
 
-    (cert_file, key_file)
+    CertKeyFiles {
+        cert_file,
+        key_file,
+    }
 }
