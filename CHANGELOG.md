@@ -2,10 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
-## [unreleased]
+## [0.0.11] - 2025-01-24
 
 ### ⚙️ Miscellaneous Tasks
 
+- Release
 - Release
 - Release
 
