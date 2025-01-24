@@ -726,7 +726,7 @@ dependencies = [
 
 [[package]]
 name = "motorx-core"
-version = "0.0.12"
+version = "0.0.10"
 dependencies = [
  "bytes",
  "futures-util",
