@@ -1,5 +1,5 @@
-ARG RUST_IMAGE=rust:slim
-FROM $RUST_IMAGE as build
+ARG RUST_IMAGE=rust:1.84-slim
+FROM ${RUST_IMAGE} AS build
 
 COPY Cargo.toml Cargo.toml
 COPY src/ src/
