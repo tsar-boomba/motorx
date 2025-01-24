@@ -103,7 +103,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        base: [bullseye-slim, bullseye]
+        base: [bullseye-slim, bullseye, bookworm, bookworm-slim]
     runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v3
@@ -118,7 +118,7 @@ jobs:
         run: echo "VERSION=${GITHUB_REF_NAME#v}" >> $GITHUB_ENV
       - name: Build and push
         uses: docker/build-push-action@v3
-        if: ${{ matrix.base == 'bullseye-slim' }}
+        if: ${{ matrix.base == 'bookworm-slim' }}
         with:
           context: .
           file: dockerfiles/${{ matrix.base }}.dockerfile
@@ -132,7 +132,7 @@ jobs:
       # for images which are'nt gonna be the latest tag
       - name: Build and push
         uses: docker/build-push-action@v3
-        if: ${{ matrix.base != 'bullseye-slim' }}
+        if: ${{ matrix.base != 'bookworm-slim' }}
         with:
           context: .
           file: dockerfiles/${{ matrix.base }}.dockerfile
