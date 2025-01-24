@@ -206,7 +206,7 @@ impl Server {
                             peer_addr,
                             Arc::clone(&self.config),
                             Arc::clone(&self.cache),
-                            Arc::clone(&self.conn_pools),
+                            Arc::clone(&self.upstreams),
                             permit,
                         );
                     }

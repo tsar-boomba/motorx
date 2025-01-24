@@ -9,7 +9,6 @@ use hyper::{
     client::{self, conn::http1::SendRequest},
 };
 use hyper_util::rt::TokioIo;
-use slab::Slab;
 use tokio::{
     select,
     sync::{
