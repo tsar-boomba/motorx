@@ -123,7 +123,7 @@ jobs:
           context: .
           file: dockerfiles/${{ matrix.base }}.dockerfile
           build-args: |
-            RUST_IMAGE=rust:1.66.1-slim
+            RUST_IMAGE=rust:1.84-slim
           push: true
           tags: |
             igamble/motorx:${{ env.VERSION }}-${{ matrix.base }}
@@ -137,7 +137,7 @@ jobs:
           context: .
           file: dockerfiles/${{ matrix.base }}.dockerfile
           build-args: |
-            RUST_IMAGE=rust:1.66.1-slim
+            RUST_IMAGE=rust:1.84-slim
           push: true
           tags: |
             igamble/motorx:${{ env.VERSION }}-${{ matrix.base }}
