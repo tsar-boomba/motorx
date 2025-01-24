@@ -69,7 +69,6 @@ async fn simple_http2() {
     assert_eq!(upstream.requests_received().await.len(), 1);
 }
 
-
 #[tokio::test]
 async fn simple_tls() {
     utils::tracing();
