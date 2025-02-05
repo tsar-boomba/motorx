@@ -170,9 +170,7 @@ impl Server {
 
     pub async fn run(self) -> Result<(), hyper::Error> {
         loop {
-            println!("Getting semaphore");
             if let Ok(permit) = self.semaphore.clone().acquire_owned().await {
-                println!("Polling listener");
                 match self.listener.accept().await {
                     Ok((stream, peer_addr)) => {
                         cfg_logging! {
