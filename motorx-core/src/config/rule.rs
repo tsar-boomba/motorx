@@ -16,12 +16,12 @@ pub struct Rule {
     pub upstream: String,
     /// Settings for caching, by providing this you opt into caching for this rule based on the methods provided in `cache_methods` (defaults to ['GET'])
     pub cache: Option<CacheSettings>,
-    /// Key into Slab containing cache for this rule
+    /// Key into Slab containing cache for this rule, it is overridden on startup
     #[cfg_attr(feature = "serde-config", serde(default))]
-    pub(crate) cache_key: usize,
-    /// Key into Slab containing upstreams
+    pub cache_key: usize,
+    /// Key into Slab containing upstreams, it is overridden on startup
     #[cfg_attr(feature = "serde-config", serde(default))]
-    pub(crate) upstream_key: usize,
+    pub upstream_key: usize,
 }
 
 impl Rule {

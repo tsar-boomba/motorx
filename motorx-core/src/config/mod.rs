@@ -36,9 +36,9 @@ pub struct Upstream {
     )]
     pub max_connections: usize,
     pub authentication: Option<Authentication>,
-    /// Upstreams key in a slab
+    /// Upstreams key in a slab, it is overridden on startup
     #[cfg_attr(feature = "serde-config", serde(default))]
-    pub(crate) key: usize,
+    pub key: usize,
 }
 
 const fn default_upstream_max_connections() -> usize {
