@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [unreleased]
+
+### 📚 Documentation
+
+- Update README.md
+
+## [0.0.13] - 2025-01-24
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
+
 ## [0.0.12] - 2025-01-24
 
 ### ⚙️ Miscellaneous Tasks
