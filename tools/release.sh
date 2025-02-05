@@ -9,7 +9,7 @@ if [[ "$1" != "patch" && "$1" != "minor" && "$1" != "major" ]]; then
 fi
 
 cargo fmt --check
-cargo build -p motorx --release
-cargo build -p motorx-core --release
+cargo build -p motorx
+cargo build -p motorx-core
 cargo nextest run --workspace
 cargo release --workspace --allow-branch main --all-features --tag-name 'v{{version}}' -v -x $1
