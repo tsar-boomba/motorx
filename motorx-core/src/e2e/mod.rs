@@ -1,11 +1,18 @@
-use std::{collections::HashMap, fs};
+use std::{fs, time::Duration};
 
-use http::Response;
+use bytes::Bytes;
+use http::{
+    header::{CONNECTION, UPGRADE},
+    Request, Response, StatusCode,
+};
 use http_body_util::{BodyExt, Empty};
+use hyper::client;
+use hyper_util::rt::TokioIo;
 use maplit::hashmap;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use utils::{start_rule, CertKeyFiles, TestUpstream};
 
-use crate::{config::match_type::MatchType, Config, Rule, Server};
+use crate::{tcp_connect, Config, Server};
 
 mod utils;
 
@@ -135,6 +142,65 @@ async fn simple_tls_http2() {
     let client = utils::http2_tls_client(fs::read_to_string(cert_file.path()).unwrap());
 
     let _ = client.get(server_uri).send().await.unwrap();
+
+    assert_eq!(upstream.requests_received().await.len(), 1);
+}
+
+#[tokio::test]
+async fn upgrade() {
+    utils::tracing();
+
+    let mut upstream = TestUpstream::new_http1(|_| async move {
+        Response::builder()
+            .status(StatusCode::SWITCHING_PROTOCOLS)
+            .body(Empty::new().boxed())
+            .unwrap()
+    })
+    .await;
+
+    let config = Config {
+        addr: "127.0.0.1:0".parse().unwrap(),
+        upstreams: hashmap! {
+            upstream.id().to_string() => upstream.as_upstream()
+        },
+        rules: vec![start_rule("/", &upstream)],
+        ..Default::default()
+    };
+    let server = Server::new(config);
+    let server_addr = server.local_addr().unwrap();
+    tokio::spawn(async move {
+        server.run().await.unwrap();
+    });
+    let stream = tcp_connect(server_addr).await.unwrap();
+    let (mut sender, conn) = client::conn::http1::Builder::new()
+        .preserve_header_case(true)
+        .title_case_headers(true)
+        .handshake::<_, Empty<Bytes>>(TokioIo::new(stream))
+        .await
+        .unwrap();
+
+    tokio::spawn(async move {
+        if let Err(err) = conn.with_upgrades().await {
+            eprintln!("conn err: {err:?}");
+        }
+    });
+
+    let req = Request::builder()
+        .header(CONNECTION, "upgrade")
+        .header(UPGRADE, "foo")
+        .body(Empty::<Bytes>::new())
+        .unwrap();
+
+    let res = sender.send_request(req).await.unwrap();
+
+    assert_eq!(res.status(), StatusCode::SWITCHING_PROTOCOLS);
+
+    let upgraded = hyper::upgrade::on(res).await.unwrap();
+    let mut conn = TokioIo::new(upgraded);
+    conn.write_all(b"hi there!").await.unwrap();
+    let mut buf = vec![0; 128];
+    let num_read = conn.read(&mut buf).await.unwrap();
+    assert!(num_read != 0);
 
     assert_eq!(upstream.requests_received().await.len(), 1);
 }

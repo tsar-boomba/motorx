@@ -1,3 +1,4 @@
+mod upgrade;
 pub mod util;
 
 use std::net::SocketAddr;
@@ -5,9 +6,11 @@ use std::sync::{Arc, Weak};
 use std::time::Instant;
 
 use bytes::Bytes;
+use http::header::{CONNECTION, UPGRADE};
 use http_body_util::combinators::BoxBody;
 use hyper::{body::Incoming, Method, StatusCode};
 use hyper::{Request, Response};
+use util::proxy_request;
 
 use crate::cache::{Cache, CacheEntry, CloneableRes};
 use crate::config::rule::Rule;
@@ -55,10 +58,10 @@ pub(crate) async fn handle_req(
         .unwrap())
 }
 
-#[cfg_attr(
-    feature = "logging",
-    tracing::instrument(level = "trace", skip(req, cache, peer_addr))
-)]
+// #[cfg_attr(
+//     feature = "logging",
+//     tracing::instrument(level = "trace", skip(req, cache, peer_addr))
+// )]
 async fn handle_match(
     req: Request<Incoming>,
     peer_addr: SocketAddr,
@@ -76,7 +79,20 @@ async fn handle_match(
             .unwrap());
     }
 
-    // use cache if enabled
+    // We got an upgrade request if:
+    //   - the request has "connection" and "upgrade" headers
+    //   - "connection" == "upgrade"
+    //   - "upgrade" is not empty
+    let connection_header = req.headers().get(CONNECTION);
+    let upgrade_header = req.headers().get(UPGRADE);
+    let upgrading = connection_header.is_some_and(|v| v.as_bytes() == b"upgrade")
+        && upgrade_header.is_some_and(|v| !v.is_empty());
+
+    if upgrading {
+        return upgrade::handle_upgrade(req, upstream, peer_addr).await;
+    }
+
+    // use cache if enabled and not upgrading
     let refresh_cache = if let Some(cache_settings) = rule.cache.as_ref() {
         if cache_settings.methods.contains(req.method()) {
             let entry = cache.get_entry(rule, req.uri()).await;
@@ -138,7 +154,7 @@ async fn handle_match(
     };
 
     let req_uri = req.uri().clone();
-    let resp = util::proxy_request(req, upstream, peer_addr).await;
+    let resp = util::proxy_request(req, upstream, peer_addr, false).await;
     cfg_logging! {
         trace!("Got res from upstream {}", peer_addr);
     }

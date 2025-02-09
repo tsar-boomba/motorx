@@ -68,21 +68,25 @@ pub(crate) fn add_proxy_headers<B>(
     );
 }
 
-const HOP_HEADERS: [&str; 8] = [
-    "connection",
+const HOP_HEADERS_NO_UPGRADE: [&str; 6] = [
     "keep-alive",
     "proxy-authenticate",
     "proxy-authorization",
     "tt",
     "trailer",
     "transfer-encoding",
-    "upgrade",
 ];
 
-pub(crate) fn remove_hop_headers<B>(req: &mut Request<B>) {
+pub(crate) fn remove_hop_headers<B>(req: &mut Request<B>, upgrading: bool) {
     let headers = req.headers_mut();
-    for hop_header in HOP_HEADERS {
+    for hop_header in HOP_HEADERS_NO_UPGRADE {
         headers.remove(hop_header);
+    }
+
+    if !upgrading {
+        for hop_header in ["connection", "upgrade"] {
+            headers.remove(hop_header);
+        }
     }
 }
 
@@ -116,20 +120,12 @@ pub(crate) fn from_response<T>(
 pub(crate) async fn clone_response<T: BodyExt>(
     res: Response<T>,
 ) -> Result<(Response<BoxBody<Bytes, crate::Error>>, Response<Bytes>), T::Error> {
-    let (og_parts, og_body) = res.into_parts();
-    let mut builder = Response::builder()
-        .status(og_parts.status)
-        .version(og_parts.version);
-
-    for (k, v) in &og_parts.headers {
-        builder = builder.header(k, v);
-    }
-
+    let (parts, og_body) = res.into_parts();
     let body = read_body::<_, crate::Error>(og_body).await?;
 
     return Ok((
-        Response::from_parts(og_parts, full(body.clone())),
-        builder.body(body).unwrap(),
+        Response::from_parts(parts.clone(), full(body.clone())),
+        Response::from_parts(parts, body),
     ));
 }
 
@@ -142,6 +138,7 @@ pub(crate) async fn proxy_request(
     mut req: Request<Incoming>,
     upstream: &UpstreamAndConnPool,
     peer_addr: SocketAddr,
+    upgrading: bool,
 ) -> Response<BoxBody<Bytes, crate::Error>> {
     const RETRY_COUNT: usize = 1;
     let mut tries = 0;
@@ -172,7 +169,7 @@ pub(crate) async fn proxy_request(
     // wait for conn to be ready, if it closes return a error
 
     add_proxy_headers(&mut req, &upstream.0, peer_addr);
-    remove_hop_headers(&mut req);
+    remove_hop_headers(&mut req, upgrading);
 
     cfg_logging! {
         debug!("Proxying request: {:?}", req);
@@ -192,7 +189,7 @@ pub(crate) async fn proxy_request(
     resp.map(|b| b.map_err(|e| e.into()).boxed())
 }
 
-fn bad_gateway() -> Response<BoxBody<Bytes, crate::Error>> {
+pub(crate) fn bad_gateway() -> Response<BoxBody<Bytes, crate::Error>> {
     Response::builder()
         .status(StatusCode::BAD_GATEWAY)
         .body(empty())
@@ -242,7 +239,7 @@ pub(crate) async fn authenticate<B>(
 
     let mut auth_req = auth_req_builder.body(Empty::<Bytes>::new()).unwrap();
     add_proxy_headers(&mut auth_req, &upstream.0, peer_addr);
-    remove_hop_headers(&mut auth_req);
+    remove_hop_headers(&mut auth_req, false);
 
     let auth_upstream = match &authentication.source {
         AuthenticationSource::Path(_) => &upstream,

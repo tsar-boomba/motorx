@@ -75,7 +75,7 @@ impl ConnPool {
                         .await?;
 
                     tokio::task::spawn(async move {
-                        if let Err(err) = conn.await {
+                        if let Err(err) = conn.with_upgrades().await {
                             cfg_logging! {error!("Connection failed: {:?}", err);}
                         }
 

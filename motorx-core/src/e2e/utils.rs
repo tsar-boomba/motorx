@@ -11,14 +11,14 @@ use std::{
 };
 
 use bytes::Bytes;
-use http::{request::Parts, Request, Response, Uri};
+use http::{header::UPGRADE, request::Parts, Request, Response, Uri};
 use http_body_util::{combinators::BoxBody, BodyExt};
 use hyper::{body::Incoming, service::service_fn};
 use hyper_util::rt::TokioIo;
 use rcgen::{CertificateParams, KeyPair};
 use reqwest::Certificate;
 use tempfile::NamedTempFile;
-use tokio::{net::TcpListener, select, sync::mpsc};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, select, sync::mpsc};
 use tracing_subscriber::EnvFilter;
 
 use crate::{
@@ -71,10 +71,34 @@ impl TestUpstream {
                                             let requests_sender = requests_sender.clone();
                                             let req_handler = req_handler.clone();
                                             async move {
-                                                let (head, body) = req.into_parts();
-                                                let body_bytes = body.collect().await.unwrap().to_bytes();
+                                                let (head, req, body_bytes) = {
+                                                    let (head, body) = req.into_parts();
+                                                    let body_bytes = body.collect().await.unwrap().to_bytes();
+                                                    (head.clone(), Request::from_parts(head, body_bytes.clone()), body_bytes)
+                                                };
+
+                                                if head.headers.contains_key(UPGRADE) {
+                                                    tokio::spawn(async move {
+                                                        match hyper::upgrade::on(req).await {
+                                                            Ok(upgraded) => {
+                                                                let mut conn = TokioIo::new(upgraded);
+                                                                conn.write_all(b"hello").await.unwrap();
+                                                                let mut buf = vec![0; 128];
+                                                                loop {
+                                                                    let num_read = conn.read(&mut buf).await.unwrap();
+                                                                }
+                                                            },
+                                                            Err(err) => {
+                                                                eprintln!("Failed to upgrade: {err:?}")
+                                                            },
+                                                        }
+                                                    });
+                                                }
+
                                                 let res = req_handler(&head).await;
+
                                                 requests_sender.send(Request::from_parts(head, body_bytes)).unwrap();
+
                                                 Ok::<_, Infallible>(res)
                                             }
                                         }
@@ -82,8 +106,9 @@ impl TestUpstream {
 
                                     tokio::spawn(async move {
                                         if let Err(_) = hyper::server::conn::http1::Builder::new()
-                                            .keep_alive(true)
-                                            .serve_connection(TokioIo::new(stream), service).await {};
+                                            .serve_connection(TokioIo::new(stream), service)
+                                            .with_upgrades()
+                                            .await {};
                                     });
                                 },
                                 Err(_) => {
