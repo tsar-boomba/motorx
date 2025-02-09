@@ -18,7 +18,12 @@ use hyper_util::rt::TokioIo;
 use rcgen::{CertificateParams, KeyPair};
 use reqwest::Certificate;
 use tempfile::NamedTempFile;
-use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, select, sync::mpsc};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::TcpListener,
+    select,
+    sync::mpsc,
+};
 use tracing_subscriber::EnvFilter;
 
 use crate::{
