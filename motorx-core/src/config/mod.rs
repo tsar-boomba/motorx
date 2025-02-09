@@ -46,13 +46,13 @@ pub enum Tls {
     #[cfg(feature = "tls")]
     File {
         certs: PathBuf,
-        private_key: PathBuf
+        private_key: PathBuf,
     },
     #[cfg(feature = "tls")]
     Acme {
         domains: Arc<[String]>,
         cache_dir: PathBuf,
-    }
+    },
 }
 
 const fn default_upstream_max_connections() -> usize {

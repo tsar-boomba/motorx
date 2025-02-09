@@ -90,7 +90,12 @@ impl Server {
 
         cfg_logging! {debug!("Starting with config: {:#?}", *config);}
 
-        Ok((config.clone(), cache, upstreams, Listener::from_config(&config)?))
+        Ok((
+            config.clone(),
+            cache,
+            upstreams,
+            Listener::from_config(&config)?,
+        ))
     }
 
     pub fn new(config: Config) -> Result<Self, Error> {
