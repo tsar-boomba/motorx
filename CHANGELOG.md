@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [unreleased]
+
+### 🚀 Features
+
+- Add experimental acme (let's encrypt) support
+
+## [0.0.17] - 2025-02-09
+
+### ⚙️ Miscellaneous Tasks
+
+- Release
+
 ## [0.0.16] - 2025-02-09
 
 ### ⚙️ Miscellaneous Tasks

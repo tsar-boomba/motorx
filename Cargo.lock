@@ -1197,7 +1197,7 @@ dependencies = [
 
 [[package]]
 name = "motorx"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "motorx-core",
  "tokio",
@@ -1207,7 +1207,7 @@ dependencies = [
 
 [[package]]
 name = "motorx-core"
-version = "0.0.17"
+version = "0.0.18"
 dependencies = [
  "bytes",
  "futures-util",
