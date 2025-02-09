@@ -58,10 +58,10 @@ pub(crate) async fn handle_req(
         .unwrap())
 }
 
-// #[cfg_attr(
-//     feature = "logging",
-//     tracing::instrument(level = "trace", skip(req, cache, peer_addr))
-// )]
+#[cfg_attr(
+    feature = "logging",
+    tracing::instrument(level = "trace", skip(req, cache, peer_addr))
+)]
 async fn handle_match(
     mut req: Request<Incoming>,
     peer_addr: SocketAddr,
