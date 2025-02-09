@@ -1,4 +1,4 @@
-use std::{collections::HashMap, hash::Hash, time::Duration};
+use std::{borrow::Cow, collections::HashMap, hash::Hash, time::Duration};
 
 use http::Method;
 use hyper::{body::Incoming, Request};
@@ -10,6 +10,9 @@ use super::match_type::MatchType;
 pub struct Rule {
     /// Rule the path must match
     pub path: MatchType,
+    /// Removes matched section from the path. Only works for start
+    #[cfg_attr(feature = "serde-config", serde(default))]
+    pub remove_match: bool,
     /// Rule that headers must match
     pub match_headers: Option<HashMap<String, MatchType>>,
     /// Where the request, should match a key in the `upstreams` object
@@ -50,6 +53,25 @@ impl Rule {
         }
 
         true
+    }
+
+    pub fn remove_match<'a>(&self, path: &'a str) -> Cow<'a, str> {
+        if self.remove_match {
+            match &self.path {
+                MatchType::Start(start) => {
+                    let mut new_path = path.replacen(start, "", 1);
+
+                    if new_path.is_empty() {
+                        new_path.push('/');
+                    }
+
+                    new_path.into()
+                }
+                _ => path.into(),
+            }
+        } else {
+            path.into()
+        }
     }
 }
 

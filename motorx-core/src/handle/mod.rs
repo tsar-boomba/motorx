@@ -63,7 +63,7 @@ pub(crate) async fn handle_req(
 //     tracing::instrument(level = "trace", skip(req, cache, peer_addr))
 // )]
 async fn handle_match(
-    req: Request<Incoming>,
+    mut req: Request<Incoming>,
     peer_addr: SocketAddr,
     rule: &Rule,
     upstream: &UpstreamAndConnPool,
@@ -78,6 +78,8 @@ async fn handle_match(
             .body(util::empty())
             .unwrap());
     }
+
+    *req.uri_mut() = rule.remove_match(req.uri().path()).parse().unwrap();
 
     // We got an upgrade request if:
     //   - the request has "connection" and "upgrade" headers

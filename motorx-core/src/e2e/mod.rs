@@ -1,4 +1,4 @@
-use std::{fs, time::Duration};
+use std::fs;
 
 use bytes::Bytes;
 use http::{
@@ -30,7 +30,7 @@ async fn simple() {
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
         },
-        rules: vec![start_rule("/", &upstream)],
+        rules: vec![start_rule("/", &upstream, false)],
         ..Default::default()
     };
     let server = Server::new(config);
@@ -60,7 +60,7 @@ async fn simple_http2() {
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
         },
-        rules: vec![start_rule("/", &upstream)],
+        rules: vec![start_rule("/", &upstream, false)],
         ..Default::default()
     };
     let server = Server::new(config);
@@ -96,7 +96,7 @@ async fn simple_tls() {
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
         },
-        rules: vec![start_rule("/", &upstream)],
+        rules: vec![start_rule("/", &upstream, false)],
         ..Default::default()
     };
     let server = Server::new_tls(config);
@@ -131,7 +131,7 @@ async fn simple_tls_http2() {
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
         },
-        rules: vec![start_rule("/", &upstream)],
+        rules: vec![start_rule("/", &upstream, false)],
         ..Default::default()
     };
     let server = Server::new_tls(config);
@@ -144,6 +144,39 @@ async fn simple_tls_http2() {
     let _ = client.get(server_uri).send().await.unwrap();
 
     assert_eq!(upstream.requests_received().await.len(), 1);
+}
+
+#[tokio::test]
+async fn remove_match() {
+    utils::tracing();
+
+    let mut upstream = TestUpstream::new_http1(|_| async move {
+        Response::builder().body(Empty::new().boxed()).unwrap()
+    })
+    .await;
+
+    let config = Config {
+        addr: "127.0.0.1:0".parse().unwrap(),
+        upstreams: hashmap! {
+            upstream.id().to_string() => upstream.as_upstream()
+        },
+        rules: vec![start_rule("/service", &upstream, true)],
+        ..Default::default()
+    };
+    let server = Server::new(config);
+    let server_uri = format!("http://{}/service", server.local_addr().unwrap());
+    tokio::spawn(async move {
+        server.run().await.unwrap();
+        println!("server task eneded!!");
+    });
+    let client = utils::client();
+
+    let _ = client.get(server_uri).send().await.unwrap();
+
+    let reqs = upstream.requests_received().await;
+    assert_eq!(reqs.len(), 1);
+    let req = &reqs[0];
+    assert_eq!(req.uri().path(), "/");
 }
 
 #[tokio::test]
@@ -163,7 +196,7 @@ async fn upgrade() {
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
         },
-        rules: vec![start_rule("/", &upstream)],
+        rules: vec![start_rule("/", &upstream, false)],
         ..Default::default()
     };
     let server = Server::new(config);
