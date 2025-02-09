@@ -23,6 +23,7 @@ pub mod log;
 mod cache;
 #[cfg(test)]
 mod e2e;
+mod listener;
 #[cfg(feature = "tls")]
 pub mod tls;
 
@@ -40,12 +41,10 @@ use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::Request;
 use hyper_util::rt::{TokioExecutor, TokioIo};
-#[cfg(feature = "tls")]
-use rustls::ServerConfig;
+use listener::Listener;
 #[cfg(feature = "tls")]
 use tls::stream::TlsStream;
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::net::TcpListener;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 pub use config::{CacheSettings, Config, Rule};
@@ -73,16 +72,16 @@ pub struct Server {
     config: Arc<Config>,
     cache: Arc<Cache>,
     upstreams: Arc<Upstreams>,
-    listener: TcpListener,
+    listener: Listener,
     /// Used to enforce max num of connections to this server
     semaphore: Arc<Semaphore>,
-    #[cfg(feature = "tls")]
-    tls_config: Option<Arc<ServerConfig>>,
 }
 
 impl Server {
     /// Do configuration shared between raw and tls servers
-    fn common_config(mut config: Config) -> (Arc<Config>, Arc<Cache>, Arc<Upstreams>, TcpListener) {
+    fn common_config(
+        mut config: Config,
+    ) -> Result<(Arc<Config>, Arc<Cache>, Arc<Upstreams>, Listener), Error> {
         let upstreams = Arc::new(init_upstreams(&mut config));
         let cache = Arc::new(Cache::from_config(&mut config));
 
@@ -91,13 +90,11 @@ impl Server {
 
         cfg_logging! {debug!("Starting with config: {:#?}", *config);}
 
-        let listener = tcp_listener(config.addr).unwrap();
-
-        (config, cache, upstreams, listener)
+        Ok((config.clone(), cache, upstreams, Listener::from_config(&config)?))
     }
 
-    pub fn new(config: Config) -> Self {
-        let (config, cache, conn_pools, listener) = Self::common_config(config);
+    pub fn new(config: Config) -> Result<Self, Error> {
+        let (config, cache, conn_pools, listener) = Self::common_config(config)?;
 
         cfg_logging! {
             info!("Motorx proxy listening on http://{}", {
@@ -105,70 +102,20 @@ impl Server {
             });
         }
 
-        Self {
+        Ok(Self {
             semaphore: Arc::new(Semaphore::new(config.max_connections)),
             cache,
             upstreams: conn_pools,
             config,
             listener,
-            #[cfg(feature = "tls")]
-            tls_config: None,
-        }
-    }
-
-    #[cfg(feature = "tls")]
-    pub fn new_tls(config: Config) -> Self {
-        let (config, cache, conn_pools, listener) = Self::common_config(config);
-        let tls_config = {
-            // Load public certificate.
-            let certs = tls::load_certs(
-                config
-                    .certs
-                    .as_ref()
-                    .expect("Must provide `certs` in config to use tls."),
-            )
-            .unwrap();
-
-            // Load private key.
-            let key = tls::load_private_key(
-                config
-                    .private_key
-                    .as_ref()
-                    .expect("Must provide `private_key` in config to use tls."),
-            )
-            .unwrap();
-
-            // Do not use client certificate authentication.
-            let mut cfg = rustls::ServerConfig::builder()
-                .with_no_client_auth()
-                .with_single_cert(certs, key)
-                .unwrap();
-
-            // Configure ALPN to accept HTTP/2, HTTP/1.1 in that order.
-            cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
-
-            Arc::new(cfg)
-        };
-
-        cfg_logging! {
-            info!("Motorx proxy listening on https://{}", listener.local_addr().unwrap());
-        }
-
-        Self {
-            semaphore: Arc::new(Semaphore::new(config.max_connections)),
-            cache,
-            upstreams: conn_pools,
-            config,
-            listener,
-            tls_config: Some(tls_config),
-        }
+        })
     }
 
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
         self.listener.local_addr()
     }
 
-    pub async fn run(self) -> Result<(), hyper::Error> {
+    pub async fn run(mut self) -> Result<(), hyper::Error> {
         loop {
             if let Ok(permit) = self.semaphore.clone().acquire_owned().await {
                 match self.listener.accept().await {
@@ -177,28 +124,6 @@ impl Server {
                             trace!("Accepted connection from {}", peer_addr);
                         }
 
-                        #[cfg(feature = "tls")]
-                        if let Some(tls_config) = self.tls_config.as_ref() {
-                            let tls_stream = TlsStream::new(stream, Arc::clone(tls_config));
-                            handle_connection(
-                                tls_stream,
-                                peer_addr,
-                                Arc::clone(&self.config),
-                                Arc::clone(&self.cache),
-                                Arc::clone(&self.upstreams),
-                                permit,
-                            )
-                        } else {
-                            handle_connection(
-                                stream,
-                                peer_addr,
-                                Arc::clone(&self.config),
-                                Arc::clone(&self.cache),
-                                Arc::clone(&self.upstreams),
-                                permit,
-                            )
-                        };
-                        #[cfg(not(feature = "tls"))]
                         handle_connection(
                             stream,
                             peer_addr,

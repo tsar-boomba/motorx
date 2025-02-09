@@ -4,7 +4,7 @@ pub mod rule;
 
 pub use rule::{CacheSettings, Rule};
 
-use std::{collections::HashMap, net::SocketAddr, str::FromStr, sync::Arc};
+use std::{collections::HashMap, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
 
 use http::Uri;
 
@@ -14,8 +14,7 @@ use self::authentication::Authentication;
 #[derive(Debug)]
 pub struct Config {
     pub addr: SocketAddr,
-    pub certs: Option<String>,
-    pub private_key: Option<String>,
+    pub tls: Option<Tls>,
     pub rules: Vec<Rule>,
     pub upstreams: HashMap<String, Arc<Upstream>>,
     #[cfg_attr(
@@ -41,6 +40,21 @@ pub struct Upstream {
     pub key: usize,
 }
 
+#[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
+#[derive(Debug)]
+pub enum Tls {
+    #[cfg(feature = "tls")]
+    File {
+        certs: PathBuf,
+        private_key: PathBuf
+    },
+    #[cfg(feature = "tls")]
+    Acme {
+        domains: Arc<[String]>,
+        cache_dir: PathBuf,
+    }
+}
+
 const fn default_upstream_max_connections() -> usize {
     10
 }
@@ -56,8 +70,7 @@ impl Default for Config {
                 std::net::Ipv4Addr::new(0, 0, 0, 0),
                 80,
             )),
-            certs: Default::default(),
-            private_key: Default::default(),
+            tls: Default::default(),
             max_connections: default_server_max_connections(),
             rules: Vec::new(),
             upstreams: HashMap::new(),

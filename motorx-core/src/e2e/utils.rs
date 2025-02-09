@@ -90,7 +90,7 @@ impl TestUpstream {
                                                                 conn.write_all(b"hello").await.unwrap();
                                                                 let mut buf = vec![0; 128];
                                                                 loop {
-                                                                    let num_read = conn.read(&mut buf).await.unwrap();
+                                                                    let _ = conn.read(&mut buf).await.unwrap();
                                                                 }
                                                             },
                                                             Err(err) => {
@@ -218,16 +218,16 @@ pub fn http2_client() -> reqwest::Client {
     base_client().http2_prior_knowledge().build().unwrap()
 }
 
-pub fn base_tls_client(cert_pem: String) -> reqwest::ClientBuilder {
+pub fn base_file_tls_client(cert_pem: String) -> reqwest::ClientBuilder {
     base_client().add_root_certificate(Certificate::from_pem(cert_pem.as_bytes()).unwrap())
 }
 
-pub fn tls_client(cert_pem: String) -> reqwest::Client {
-    base_tls_client(cert_pem).build().unwrap()
+pub fn file_tls_client(cert_pem: String) -> reqwest::Client {
+    base_file_tls_client(cert_pem).build().unwrap()
 }
 
-pub fn http2_tls_client(cert_pem: String) -> reqwest::Client {
-    base_tls_client(cert_pem)
+pub fn http2_file_tls_client(cert_pem: String) -> reqwest::Client {
+    base_file_tls_client(cert_pem)
         .http2_prior_knowledge()
         .build()
         .unwrap()

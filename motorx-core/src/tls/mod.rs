@@ -1,4 +1,4 @@
-use std::{fs, io};
+use std::{fs, io, path::Path};
 
 use itertools::Itertools;
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
@@ -6,10 +6,16 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer};
 pub mod stream;
 
 // Load public certificate from file.
-pub(crate) fn load_certs(filename: &str) -> io::Result<Vec<CertificateDer<'static>>> {
+pub(crate) fn load_certs(filename: impl AsRef<Path>) -> io::Result<Vec<CertificateDer<'static>>> {
     // Open certificate file.
-    let certfile = fs::File::open(filename)
-        .map_err(|e| error(format!("failed to open {}: {}", filename, e)))?;
+    let filename = filename.as_ref();
+    let certfile = fs::File::open(filename).map_err(|e| {
+        error(format!(
+            "failed to open {}: {}",
+            filename.to_string_lossy(),
+            e
+        ))
+    })?;
     let mut reader = io::BufReader::new(certfile);
 
     // Load and return certificate.
@@ -25,10 +31,16 @@ pub(crate) fn load_certs(filename: &str) -> io::Result<Vec<CertificateDer<'stati
 }
 
 // Load private key from file.
-pub(crate) fn load_private_key(filename: &str) -> io::Result<PrivateKeyDer<'static>> {
+pub(crate) fn load_private_key(filename: impl AsRef<Path>) -> io::Result<PrivateKeyDer<'static>> {
     // Open keyfile.
-    let keyfile = fs::File::open(filename)
-        .map_err(|e| error(format!("failed to open {}: {}", filename, e)))?;
+    let filename = filename.as_ref();
+    let keyfile = fs::File::open(filename).map_err(|e| {
+        error(format!(
+            "failed to open {}: {}",
+            filename.to_string_lossy(),
+            e
+        ))
+    })?;
     let mut reader = io::BufReader::new(keyfile);
 
     // TODO: migrate to rustls-pki-types

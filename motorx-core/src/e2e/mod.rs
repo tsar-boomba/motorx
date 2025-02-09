@@ -1,4 +1,4 @@
-use std::fs;
+use std::{fs, sync::Arc};
 
 use bytes::Bytes;
 use http::{
@@ -12,7 +12,7 @@ use maplit::hashmap;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use utils::{start_rule, CertKeyFiles, TestUpstream};
 
-use crate::{tcp_connect, Config, Server};
+use crate::{config::Tls, tcp_connect, Config, Server};
 
 mod utils;
 
@@ -33,7 +33,7 @@ async fn simple() {
         rules: vec![start_rule("/", &upstream, false)],
         ..Default::default()
     };
-    let server = Server::new(config);
+    let server = Server::new(config).unwrap();
     let server_uri = format!("http://{}", server.local_addr().unwrap());
     tokio::spawn(async move {
         server.run().await.unwrap();
@@ -63,7 +63,7 @@ async fn simple_http2() {
         rules: vec![start_rule("/", &upstream, false)],
         ..Default::default()
     };
-    let server = Server::new(config);
+    let server = Server::new(config).unwrap();
     let server_uri = format!("http://{}", server.local_addr().unwrap());
     tokio::spawn(async move {
         server.run().await.unwrap();
@@ -90,8 +90,10 @@ async fn simple_tls() {
     .await;
 
     let config = Config {
-        certs: Some(cert_file.path().to_str().unwrap().into()),
-        private_key: Some(key_file.path().to_str().unwrap().into()),
+        tls: Some(Tls::File {
+            certs: cert_file.path().to_str().unwrap().into(),
+            private_key: key_file.path().to_str().unwrap().into(),
+        }),
         addr: "127.0.0.1:0".parse().unwrap(),
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
@@ -99,12 +101,12 @@ async fn simple_tls() {
         rules: vec![start_rule("/", &upstream, false)],
         ..Default::default()
     };
-    let server = Server::new_tls(config);
+    let server = Server::new(config).unwrap();
     let server_uri = format!("https://localhost:{}", server.local_addr().unwrap().port());
     tokio::spawn(async move {
         server.run().await.unwrap();
     });
-    let client = utils::tls_client(fs::read_to_string(cert_file.path()).unwrap());
+    let client = utils::file_tls_client(fs::read_to_string(cert_file.path()).unwrap());
 
     let _ = client.get(server_uri).send().await.unwrap();
 
@@ -125,8 +127,10 @@ async fn simple_tls_http2() {
     .await;
 
     let config = Config {
-        certs: Some(cert_file.path().to_str().unwrap().into()),
-        private_key: Some(key_file.path().to_str().unwrap().into()),
+        tls: Some(Tls::File {
+            certs: cert_file.path().to_str().unwrap().into(),
+            private_key: key_file.path().to_str().unwrap().into(),
+        }),
         addr: "127.0.0.1:0".parse().unwrap(),
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
@@ -134,12 +138,48 @@ async fn simple_tls_http2() {
         rules: vec![start_rule("/", &upstream, false)],
         ..Default::default()
     };
-    let server = Server::new_tls(config);
+    let server = Server::new(config).unwrap();
     let server_uri = format!("https://localhost:{}", server.local_addr().unwrap().port());
     tokio::spawn(async move {
         server.run().await.unwrap();
     });
-    let client = utils::http2_tls_client(fs::read_to_string(cert_file.path()).unwrap());
+    let client = utils::http2_file_tls_client(fs::read_to_string(cert_file.path()).unwrap());
+
+    let _ = client.get(server_uri).send().await.unwrap();
+
+    assert_eq!(upstream.requests_received().await.len(), 1);
+}
+
+// TODO: find a way to test acme automatically
+#[allow(unused)]
+async fn simple_tls_acme() {
+    utils::tracing();
+
+    let mut upstream = TestUpstream::new_http1(|_| async move {
+        Response::builder().body(Empty::new().boxed()).unwrap()
+    })
+    .await;
+
+    let temp_dir = tempfile::tempdir().unwrap();
+
+    let config = Config {
+        tls: Some(Tls::Acme {
+            domains: Arc::from(["localhost".to_string()]),
+            cache_dir: temp_dir.path().to_path_buf(),
+        }),
+        addr: "127.0.0.1:0".parse().unwrap(),
+        upstreams: hashmap! {
+            upstream.id().to_string() => upstream.as_upstream()
+        },
+        rules: vec![start_rule("/", &upstream, false)],
+        ..Default::default()
+    };
+    let server = Server::new(config).unwrap();
+    let server_uri = format!("https://localhost:{}", server.local_addr().unwrap().port());
+    tokio::spawn(async move {
+        server.run().await.unwrap();
+    });
+    let client = utils::client();
 
     let _ = client.get(server_uri).send().await.unwrap();
 
@@ -163,7 +203,7 @@ async fn remove_match() {
         rules: vec![start_rule("/service", &upstream, true)],
         ..Default::default()
     };
-    let server = Server::new(config);
+    let server = Server::new(config).unwrap();
     let server_uri = format!("http://{}/service", server.local_addr().unwrap());
     tokio::spawn(async move {
         server.run().await.unwrap();
@@ -179,6 +219,7 @@ async fn remove_match() {
     assert_eq!(req.uri().path(), "/");
 }
 
+// TODO: make better upgrade test
 #[tokio::test]
 async fn upgrade() {
     utils::tracing();
@@ -199,7 +240,7 @@ async fn upgrade() {
         rules: vec![start_rule("/", &upstream, false)],
         ..Default::default()
     };
-    let server = Server::new(config);
+    let server = Server::new(config).unwrap();
     let server_addr = server.local_addr().unwrap();
     tokio::spawn(async move {
         server.run().await.unwrap();
