@@ -173,6 +173,7 @@ impl TestUpstream {
             addr: self.uri(),
             max_connections: 10,
             authentication: None,
+            buffer_size: 8 * 1024,
             key: 0,
         })
     }

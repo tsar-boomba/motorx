@@ -44,7 +44,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo};
 use listener::Listener;
 #[cfg(feature = "tls")]
 use tls::stream::TlsStream;
-use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::io::{AsyncRead, AsyncWrite, BufStream};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 pub use config::{CacheSettings, Config, Rule};
@@ -130,7 +130,7 @@ impl Server {
                         }
 
                         handle_connection(
-                            stream,
+                            BufStream::with_capacity(8 * 1024, 8 * 1024, stream),
                             peer_addr,
                             Arc::clone(&self.config),
                             Arc::clone(&self.cache),
@@ -256,7 +256,11 @@ fn init_upstreams(config: &mut Config) -> Upstreams {
         Arc::get_mut(upstream).unwrap().key = key;
         upstreams.push((
             Arc::clone(upstream),
-            ConnPool::new(upstream.addr.clone(), upstream.max_connections),
+            ConnPool::new(
+                upstream.addr.clone(),
+                upstream.max_connections,
+                upstream.buffer_size,
+            ),
         ));
     }
 

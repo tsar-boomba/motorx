@@ -22,6 +22,11 @@ pub struct Config {
         serde(default = "default_server_max_connections")
     )]
     pub max_connections: usize,
+    #[cfg_attr(
+        feature = "serde-config",
+        serde(default = "default_client_buffer_size")
+    )]
+    pub client_buffer_size: usize,
 }
 
 #[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
@@ -35,6 +40,11 @@ pub struct Upstream {
     )]
     pub max_connections: usize,
     pub authentication: Option<Authentication>,
+    #[cfg_attr(
+        feature = "serde-config",
+        serde(default = "default_upstream_buffer_size")
+    )]
+    pub buffer_size: usize,
     /// Upstreams key in a slab, it is overridden on startup
     #[cfg_attr(feature = "serde-config", serde(default))]
     pub key: usize,
@@ -63,6 +73,15 @@ const fn default_server_max_connections() -> usize {
     100
 }
 
+const fn default_upstream_buffer_size() -> usize {
+    8 * 1024
+}
+
+const fn default_client_buffer_size() -> usize {
+    8 * 1024
+}
+
+
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -72,6 +91,7 @@ impl Default for Config {
             )),
             tls: Default::default(),
             max_connections: default_server_max_connections(),
+            client_buffer_size: default_client_buffer_size(),
             rules: Vec::new(),
             upstreams: HashMap::new(),
         }

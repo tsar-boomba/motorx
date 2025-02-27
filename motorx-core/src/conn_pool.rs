@@ -10,6 +10,7 @@ use hyper::{
 };
 use hyper_util::rt::TokioIo;
 use tokio::{
+    io::BufStream,
     select,
     sync::{
         mpsc::{self, Receiver, Sender},
@@ -31,6 +32,7 @@ pub(crate) struct ConnPool {
     receiver: Mutex<Receiver<SendRequest<Incoming>>>,
     /// Keep channel alive forever, send clones to handler so they can add sender back into queue
     sender: Sender<SendRequest<Incoming>>,
+    buffer_size: usize,
     uri: Uri,
 }
 
@@ -41,11 +43,12 @@ pub(crate) struct PooledConn {
 }
 
 impl ConnPool {
-    pub(crate) fn new(uri: Uri, max_connections: usize) -> Self {
+    pub(crate) fn new(uri: Uri, max_connections: usize, buffer_size: usize) -> Self {
         let (sender, receiver) = mpsc::channel::<SendRequest<Incoming>>(max_connections);
         ConnPool {
             semaphore: Arc::new(Semaphore::new(max_connections)),
             sender,
+            buffer_size,
             receiver: Mutex::new(receiver),
             uri,
         }
@@ -67,7 +70,7 @@ impl ConnPool {
                 permit = Arc::clone(&self.semaphore).acquire_owned() => {
                     let permit = permit.unwrap();
                     cfg_logging! {info!("Opened new connection to: {}", self.uri);}
-                    let stream = tcp_connect(self.uri.authority().unwrap().as_str()).await?;
+                    let stream = BufStream::with_capacity(self.buffer_size, self.buffer_size, tcp_connect(self.uri.authority().unwrap().as_str()).await?);
                     let (sender, conn) = client::conn::http1::Builder::new()
                         .preserve_header_case(true)
                         .title_case_headers(true)
