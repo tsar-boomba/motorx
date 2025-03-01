@@ -35,19 +35,19 @@ impl Rule {
     pub fn matches(&self, req: &Request<Incoming>, sni_host: Option<&str>) -> bool {
         // reject requests that have a different host header than what we got from sni
         if let Some(sni_host) = sni_host {
-            let Some(host) = req.headers().get(HOST) else {
+            let Some(host) = req.uri().host() else {
                 cfg_logging! {
                     tracing::warn!("Request missing HOST header!");
                 }
                 return false;
             };
 
-            if host != sni_host.as_bytes() {
+            if host != sni_host {
                 return false;
             }
 
             if let Some(expected_host) = self.host.as_deref() {
-                if host.as_bytes() != expected_host.as_bytes() {
+                if host != expected_host {
                     return false;
                 }
             }
