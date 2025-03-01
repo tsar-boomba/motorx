@@ -23,12 +23,13 @@ use crate::{cfg_logging, UpstreamAndConnPool, Upstreams};
 pub(crate) async fn handle_req(
     req: Request<hyper::body::Incoming>,
     peer_addr: SocketAddr,
+    domain: Option<Arc<str>>,
     config: Arc<Config>,
     cache: Arc<Cache>,
     upstreams: Arc<Upstreams>,
 ) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {
     for rule in &config.rules {
-        if rule.matches(&req) {
+        if rule.matches(&req, domain.as_deref()) {
             let upstream = upstreams.get(rule.upstream_key).expect("`upstream` in a rule should match a key in the `upstreams` property at the root of the config.");
 
             // handle authentication if necessary

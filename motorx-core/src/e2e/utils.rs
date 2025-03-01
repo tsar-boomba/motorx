@@ -211,6 +211,7 @@ pub fn tracing() {
 pub fn start_rule(starts_with: &str, upstream: &TestUpstream, remove_match: bool) -> Rule {
     Rule {
         path: MatchType::Start(starts_with.into()),
+        host: None,
         remove_match,
         match_headers: None,
         upstream: upstream.id().to_string(),

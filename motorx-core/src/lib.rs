@@ -128,10 +128,12 @@ impl Server {
                         cfg_logging! {
                             trace!("Accepted connection from {}", peer_addr);
                         }
+                        let domain = stream.domain();
 
                         handle_connection(
                             BufStream::with_capacity(8 * 1024, 8 * 1024, stream),
                             peer_addr,
+                            domain,
                             Arc::clone(&self.config),
                             Arc::clone(&self.cache),
                             Arc::clone(&self.upstreams),
@@ -156,31 +158,36 @@ impl Server {
 fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     stream: S,
     peer_addr: SocketAddr,
+    domain: Option<Arc<str>>,
     config: Arc<Config>,
     cache: Arc<Cache>,
     conn_pools: Arc<Upstreams>,
     permit: OwnedSemaphorePermit,
 ) {
-    let service = service_fn(move |req: Request<Incoming>| {
-        let config = config.clone();
-        let cache = cache.clone();
-        let conn_pools = conn_pools.clone();
+    let service = service_fn({
+        move |req: Request<Incoming>| {
+            let domain = domain.clone();
+            let config = config.clone();
+            let cache = cache.clone();
+            let conn_pools = conn_pools.clone();
 
-        async move {
-            let res = handle::handle_req(
-                req,
-                peer_addr,
-                Arc::clone(&config),
-                Arc::clone(&cache),
-                Arc::clone(&conn_pools),
-            )
-            .await;
+            async move {
+                let res = handle::handle_req(
+                    req,
+                    peer_addr,
+                    domain,
+                    Arc::clone(&config),
+                    Arc::clone(&cache),
+                    Arc::clone(&conn_pools),
+                )
+                .await;
 
-            cfg_logging! {
-                trace!("Responded to req from {}", peer_addr);
+                cfg_logging! {
+                    trace!("Responded to req from {}", peer_addr);
+                }
+
+                res
             }
-
-            res
         }
     });
 

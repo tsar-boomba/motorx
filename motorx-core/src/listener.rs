@@ -39,6 +39,7 @@ pub(crate) enum Stream {
                 tokio_util::compat::Compat<tokio::net::TcpStream>,
             >,
         >,
+        Arc<str>,
     ),
 }
 
@@ -136,8 +137,19 @@ impl Listener {
                     .expect("Listener closed unexpectedly")?
                     .into_inner();
                 let peer = stream.get_ref().0.get_ref().peer_addr()?;
-                Ok((Stream::AcmeTls(stream.compat()), peer))
+                let domain = Arc::from(stream.get_ref().1.server_name().unwrap());
+                Ok((Stream::AcmeTls(stream.compat(), domain), peer))
             }
+        }
+    }
+}
+
+impl Stream {
+    pub fn domain(&self) -> Option<Arc<str>> {
+        match self {
+            Stream::Plain(_) => None,
+            Stream::FileTls(_) => None,
+            Stream::AcmeTls(_, domain) => Some(domain.clone()),
         }
     }
 }
@@ -157,7 +169,7 @@ impl AsyncRead for Stream {
                 <crate::TlsStream as tokio::io::AsyncRead>::poll_read(Pin::new(tls_stream), cx, buf)
             }
             #[cfg(feature = "tls")]
-            Stream::AcmeTls(tls_stream) => {
+            Stream::AcmeTls(tls_stream, _) => {
                 <tokio_util::compat::Compat<
                     rustls_acme::futures_rustls::server::TlsStream<
                         tokio_util::compat::Compat<tokio::net::TcpStream>,
@@ -185,7 +197,7 @@ impl AsyncWrite for Stream {
                 buf,
             ),
             #[cfg(feature = "tls")]
-            Stream::AcmeTls(tls_stream) => {
+            Stream::AcmeTls(tls_stream, _) => {
                 <tokio_util::compat::Compat<
                     rustls_acme::futures_rustls::server::TlsStream<
                         tokio_util::compat::Compat<tokio::net::TcpStream>,
@@ -208,7 +220,7 @@ impl AsyncWrite for Stream {
                 <crate::TlsStream as tokio::io::AsyncWrite>::poll_flush(Pin::new(tls_stream), cx)
             }
             #[cfg(feature = "tls")]
-            Stream::AcmeTls(tls_stream) => {
+            Stream::AcmeTls(tls_stream, _) => {
                 <tokio_util::compat::Compat<
                     rustls_acme::futures_rustls::server::TlsStream<
                         tokio_util::compat::Compat<tokio::net::TcpStream>,
@@ -231,7 +243,7 @@ impl AsyncWrite for Stream {
                 <crate::TlsStream as tokio::io::AsyncWrite>::poll_shutdown(Pin::new(tls_stream), cx)
             }
             #[cfg(feature = "tls")]
-            Stream::AcmeTls(tls_stream) => {
+            Stream::AcmeTls(tls_stream, _) => {
                 <tokio_util::compat::Compat<
                     rustls_acme::futures_rustls::server::TlsStream<
                         tokio_util::compat::Compat<tokio::net::TcpStream>,

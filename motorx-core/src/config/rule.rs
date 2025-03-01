@@ -1,7 +1,9 @@
 use std::{borrow::Cow, collections::HashMap, hash::Hash, time::Duration};
 
-use http::Method;
+use http::{header::HOST, Method};
 use hyper::{body::Incoming, Request};
+
+use crate::cfg_logging;
 
 use super::match_type::MatchType;
 
@@ -10,6 +12,8 @@ use super::match_type::MatchType;
 pub struct Rule {
     /// Rule the path must match
     pub path: MatchType,
+    /// Match based on SNI server name client sent
+    pub host: Option<String>,
     /// Removes matched section from the path. Only works for start
     #[cfg_attr(feature = "serde-config", serde(default))]
     pub remove_match: bool,
@@ -28,7 +32,27 @@ pub struct Rule {
 }
 
 impl Rule {
-    pub fn matches(&self, req: &Request<Incoming>) -> bool {
+    pub fn matches(&self, req: &Request<Incoming>, sni_host: Option<&str>) -> bool {
+        // reject requests that have a different host header than what we got from sni
+        if let Some(sni_host) = sni_host {
+            let Some(host) = req.headers().get(HOST) else {
+                cfg_logging! {
+                    tracing::warn!("Request missing HOST header!");
+                }
+                return false;
+            };
+
+            if host != sni_host.as_bytes() {
+                return false;
+            }
+
+            if let Some(expected_host) = self.host.as_deref() {
+                if host.as_bytes() != expected_host.as_bytes() {
+                    return false;
+                }
+            }
+        }
+
         let path_result = self.path.matches(req.uri().path());
 
         if !path_result.is_match() {
