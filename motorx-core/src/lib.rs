@@ -26,7 +26,6 @@ mod e2e;
 mod listener;
 #[cfg(feature = "tls")]
 pub mod tls;
-mod connect;
 
 #[cfg_attr(feature = "logging", macro_use(info, error, debug, trace))]
 #[cfg(feature = "logging")]
