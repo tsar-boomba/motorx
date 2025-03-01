@@ -1,4 +1,4 @@
-use std::{fs, sync::Arc};
+use std::{fs, sync::Arc, time::Duration};
 
 use bytes::Bytes;
 use http::{
@@ -9,7 +9,7 @@ use http_body_util::{BodyExt, Empty};
 use hyper::client;
 use hyper_util::rt::TokioIo;
 use maplit::hashmap;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::{io::AsyncReadExt, join};
 use utils::{start_rule, CertKeyFiles, TestUpstream};
 
 use crate::{config::Tls, tcp_connect, Config, Server};
@@ -20,10 +20,11 @@ mod utils;
 async fn simple() {
     utils::tracing();
 
-    let mut upstream = TestUpstream::new_http1(|_| async move {
-        Response::builder().body(Empty::new().boxed()).unwrap()
-    })
-    .await;
+    let mut upstream =
+        TestUpstream::new(
+            |_| async move { Response::builder().body(Empty::new().boxed()).unwrap() },
+        )
+        .await;
 
     let config = Config {
         addr: "127.0.0.1:0".parse().unwrap(),
@@ -50,10 +51,11 @@ async fn simple() {
 async fn simple_http2() {
     utils::tracing();
 
-    let mut upstream = TestUpstream::new_http1(|_| async move {
-        Response::builder().body(Empty::new().boxed()).unwrap()
-    })
-    .await;
+    let mut upstream =
+        TestUpstream::new(
+            |_| async move { Response::builder().body(Empty::new().boxed()).unwrap() },
+        )
+        .await;
 
     let config = Config {
         addr: "127.0.0.1:0".parse().unwrap(),
@@ -84,10 +86,11 @@ async fn simple_tls() {
         key_file,
     } = utils::gen_self_signed();
 
-    let mut upstream = TestUpstream::new_http1(|_| async move {
-        Response::builder().body(Empty::new().boxed()).unwrap()
-    })
-    .await;
+    let mut upstream =
+        TestUpstream::new(
+            |_| async move { Response::builder().body(Empty::new().boxed()).unwrap() },
+        )
+        .await;
 
     let config = Config {
         tls: Some(Tls::File {
@@ -121,10 +124,11 @@ async fn simple_tls_http2() {
         key_file,
     } = utils::gen_self_signed();
 
-    let mut upstream = TestUpstream::new_http1(|_| async move {
-        Response::builder().body(Empty::new().boxed()).unwrap()
-    })
-    .await;
+    let mut upstream =
+        TestUpstream::new(
+            |_| async move { Response::builder().body(Empty::new().boxed()).unwrap() },
+        )
+        .await;
 
     let config = Config {
         tls: Some(Tls::File {
@@ -155,10 +159,11 @@ async fn simple_tls_http2() {
 async fn simple_tls_acme() {
     utils::tracing();
 
-    let mut upstream = TestUpstream::new_http1(|_| async move {
-        Response::builder().body(Empty::new().boxed()).unwrap()
-    })
-    .await;
+    let mut upstream =
+        TestUpstream::new(
+            |_| async move { Response::builder().body(Empty::new().boxed()).unwrap() },
+        )
+        .await;
 
     let temp_dir = tempfile::tempdir().unwrap();
 
@@ -190,10 +195,11 @@ async fn simple_tls_acme() {
 async fn remove_match() {
     utils::tracing();
 
-    let mut upstream = TestUpstream::new_http1(|_| async move {
-        Response::builder().body(Empty::new().boxed()).unwrap()
-    })
-    .await;
+    let mut upstream =
+        TestUpstream::new(
+            |_| async move { Response::builder().body(Empty::new().boxed()).unwrap() },
+        )
+        .await;
 
     let config = Config {
         addr: "127.0.0.1:0".parse().unwrap(),
@@ -224,7 +230,7 @@ async fn remove_match() {
 async fn upgrade() {
     utils::tracing();
 
-    let mut upstream = TestUpstream::new_http1(|_| async move {
+    let mut upstream = TestUpstream::new(|_| async move {
         Response::builder()
             .status(StatusCode::SWITCHING_PROTOCOLS)
             .body(Empty::new().boxed())
@@ -271,10 +277,50 @@ async fn upgrade() {
 
     let upgraded = hyper::upgrade::on(res).await.unwrap();
     let mut conn = TokioIo::new(upgraded);
-    conn.write_all(b"hi there!").await.unwrap();
-    let mut buf = vec![0; 128];
-    let num_read = conn.read(&mut buf).await.unwrap();
-    assert!(num_read != 0);
+    let mut buf = vec![0; 1024];
+    let num_read = conn.read(&mut buf).await;
+    assert!(num_read.unwrap() != 0);
 
     assert_eq!(upstream.requests_received().await.len(), 1);
+}
+
+#[tokio::test]
+async fn h2_upstream() {
+    utils::tracing();
+
+    let mut upstream =
+        TestUpstream::new(
+            |_| async move { Response::builder().body(Empty::new().boxed()).unwrap() },
+        )
+        .await;
+
+    let config = Config {
+        addr: "127.0.0.1:0".parse().unwrap(),
+        upstreams: hashmap! {
+            upstream.id().to_string() => upstream.as_h2_upstream()
+        },
+        rules: vec![start_rule("/", &upstream, false)],
+        ..Default::default()
+    };
+    let server = Server::new(config).unwrap();
+    let server_uri = format!("http://{}", server.local_addr().unwrap());
+    tokio::spawn(async move {
+        server.run().await.unwrap();
+        println!("server task eneded!!");
+    });
+    let client = utils::client();
+
+    // Parallel requests, but only one connection
+    let (r1, r2, r3) = join!(
+        client.get(&server_uri).send(),
+        client.get(&server_uri).send(),
+        client.get(&server_uri).send()
+    );
+
+    r1.unwrap();
+    r2.unwrap();
+    r3.unwrap();
+
+    assert_eq!(upstream.requests_received().await.len(), 3);
+    assert_eq!(upstream.connections_accepted(), 1);
 }

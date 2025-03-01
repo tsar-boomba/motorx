@@ -26,6 +26,7 @@ mod e2e;
 mod listener;
 #[cfg(feature = "tls")]
 pub mod tls;
+mod connect;
 
 #[cfg_attr(feature = "logging", macro_use(info, error, debug, trace))]
 #[cfg(feature = "logging")]
@@ -36,7 +37,7 @@ use std::sync::Arc;
 
 use cache::Cache;
 use config::Upstream;
-use conn_pool::ConnPool;
+use conn_pool::Pool;
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::Request;
@@ -51,7 +52,7 @@ pub use config::{CacheSettings, Config, Rule};
 pub use error::Error;
 
 // TODO: Consider Boxing this (Or just ConnPool) to improve spacial locality
-type UpstreamAndConnPool = (Arc<Upstream>, ConnPool);
+type UpstreamAndConnPool = (Arc<Upstream>, Pool);
 type Upstreams = Vec<UpstreamAndConnPool>;
 
 /// Motorx proxy server
@@ -256,10 +257,12 @@ fn init_upstreams(config: &mut Config) -> Upstreams {
         Arc::get_mut(upstream).unwrap().key = key;
         upstreams.push((
             Arc::clone(upstream),
-            ConnPool::new(
-                upstream.addr.clone(),
+            Pool::new(
+                upstream.addr.authority().unwrap().clone(),
                 upstream.max_connections,
                 upstream.buffer_size,
+                upstream.proto,
+                10, // TODO: make configurable
             ),
         ));
     }

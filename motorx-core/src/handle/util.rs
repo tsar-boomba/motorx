@@ -3,12 +3,13 @@ use std::net::SocketAddr;
 use bytes::Bytes;
 use http::{header::HOST, HeaderValue, Request, Response, StatusCode};
 use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
-use hyper::{body::Incoming, client, upgrade::Upgraded};
+use hyper::{body::Incoming, client};
 use hyper_util::rt::TokioIo;
 
 use crate::{
     cfg_logging,
     config::{authentication::AuthenticationSource, Upstream},
+    conn_pool::SendRequest,
     tcp_connect, UpstreamAndConnPool, Upstreams,
 };
 
@@ -136,55 +137,32 @@ pub(crate) async fn read_body<B: BodyExt, E>(body: B) -> Result<Bytes, B::Error>
 
 pub(crate) async fn proxy_request(
     mut req: Request<Incoming>,
-    upstream: &UpstreamAndConnPool,
+    upstream: &Upstream,
+    send_req: &mut SendRequest,
     peer_addr: SocketAddr,
     upgrading: bool,
 ) -> Response<BoxBody<Bytes, crate::Error>> {
-    const RETRY_COUNT: usize = 1;
-    let mut tries = 0;
-
-    let mut conn = loop {
-        if tries > RETRY_COUNT {
-            return bad_gateway();
-        }
-
-        let mut conn = match upstream.1.get_sender().await {
-            Ok(senders) => senders,
-            Err(err) => {
-                cfg_logging! {error!("Failed to connect to {}: {err}", upstream.0.addr);}
-                tries += 1;
-                continue;
-            }
-        };
-
-        if let Err(err) = conn.ready().await {
-            cfg_logging! {error!("Connection to {} was unexpectedly closed: {err}", upstream.0.addr);}
-            tries += 1;
-            continue;
-        }
-
-        break conn;
-    };
-
-    // wait for conn to be ready, if it closes return a error
-
-    add_proxy_headers(&mut req, &upstream.0, peer_addr);
+    add_proxy_headers(&mut req, &upstream, peer_addr);
     remove_hop_headers(&mut req, upgrading);
 
     cfg_logging! {
-        debug!("Proxying request: {:?}", req);
+        trace!("Proxying request: {:?}", req);
     }
 
-    let resp = match conn.send_request(req).await {
+    if let Err(e) = send_req.ready().await {
+        cfg_logging!{
+            println!("Upstream connection unexpectedly closed: {e:?}");
+        }
+        return bad_gateway();
+    }
+
+    let resp = match send_req.send_request(req).await {
         Ok(resp) => resp,
         Err(err) => {
-            cfg_logging! {error!("Failed to proxy request to {}: {err}", upstream.0.addr);};
+            cfg_logging! {error!("Failed to proxy request to {}: {err}", upstream.addr);};
             return bad_gateway();
         }
     };
-
-    // Dropping a pooled connection returns it to the pool
-    drop(conn);
 
     resp.map(|b| b.map_err(|e| e.into()).boxed())
 }
@@ -272,24 +250,4 @@ pub(crate) async fn authenticate<B>(
     } else {
         Ok(Some(res.map(|b| b.map_err(|e| e.into()).boxed())))
     }
-}
-
-// Create a TCP connection to host:port, build a tunnel between the connection and
-// the upgraded connection
-pub async fn tunnel(upgraded: Upgraded, addr: &str) -> std::io::Result<()> {
-    // Connect to remote server
-    let mut server = tcp_connect(addr).await?;
-    let mut upgraded = TokioIo::new(upgraded);
-
-    // Proxying data
-    let (from_client, from_server) =
-        tokio::io::copy_bidirectional(&mut upgraded, &mut server).await?;
-
-    // Print message when done
-    println!(
-        "client wrote {} bytes and received {} bytes",
-        from_client, from_server
-    );
-
-    Ok(())
 }

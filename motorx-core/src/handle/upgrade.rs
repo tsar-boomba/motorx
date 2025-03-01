@@ -6,7 +6,7 @@ use http_body_util::{combinators::BoxBody, Empty};
 use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
 
-use crate::{cfg_logging, UpstreamAndConnPool};
+use crate::{cfg_logging, config::Proto, UpstreamAndConnPool};
 
 use super::util;
 
@@ -16,6 +16,9 @@ pub(crate) async fn handle_upgrade(
     peer_addr: SocketAddr,
 ) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {
     // First, proxy upgrade request to upstream to see if it is successful
+    cfg_logging!{
+        debug!("Upgrading req: {req:?}");
+    }
 
     // We need to make a copy of the original request's head so that we can send one to the upstream (with og body),
     // and use the other for upgrading with hyper because sending to upstream needs ownership of `req`
@@ -26,13 +29,17 @@ pub(crate) async fn handle_upgrade(
             Request::from_parts(og_head, Empty::<Bytes>::new()),
         )
     };
-    let mut res = util::proxy_request(client_req, upstream, peer_addr, true).await;
+
+    // Must use an http1 send_req for upgrades
+    let mut send_req = upstream.1.new_connection(None, Proto::Http1).await?;
+    let mut res = util::proxy_request(client_req, &upstream.0, &mut send_req, peer_addr, true).await;
 
     match hyper::upgrade::on(&mut res).await {
         Ok(upgraded_upstream) => {
             tokio::task::spawn(async move {
                 match hyper::upgrade::on(upgrade_req).await {
                     Ok(upgraded_client) => {
+                        // TODO: consider copy_bidirectional_with_sizes for configurability
                         if let Err(err) = tokio::io::copy_bidirectional(
                             &mut TokioIo::new(upgraded_client),
                             &mut TokioIo::new(upgraded_upstream),

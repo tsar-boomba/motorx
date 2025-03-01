@@ -10,7 +10,6 @@ use http::header::{CONNECTION, UPGRADE};
 use http_body_util::combinators::BoxBody;
 use hyper::{body::Incoming, Method, StatusCode};
 use hyper::{Request, Response};
-use util::proxy_request;
 
 use crate::cache::{Cache, CacheEntry, CloneableRes};
 use crate::config::rule::Rule;
@@ -156,7 +155,11 @@ async fn handle_match(
     };
 
     let req_uri = req.uri().clone();
-    let resp = util::proxy_request(req, upstream, peer_addr, false).await;
+    let mut send_req = upstream.1.get_sender().await?;
+    let resp = util::proxy_request(req, &upstream.0, &mut send_req, peer_addr, false).await;
+    
+    // Send back to poool ASAP
+    drop(send_req);
     cfg_logging! {
         trace!("Got res from upstream {}", peer_addr);
     }

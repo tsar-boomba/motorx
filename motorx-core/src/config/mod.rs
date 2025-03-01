@@ -45,9 +45,22 @@ pub struct Upstream {
         serde(default = "default_upstream_buffer_size")
     )]
     pub buffer_size: usize,
+    #[cfg_attr(
+        feature = "serde-config",
+        serde(default)
+    )]
+    pub proto: Proto,
     /// Upstreams key in a slab, it is overridden on startup
     #[cfg_attr(feature = "serde-config", serde(default))]
     pub key: usize,
+}
+
+#[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Proto {
+    #[default]
+    Http1,
+    Http2,
 }
 
 #[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
