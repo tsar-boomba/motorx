@@ -8,7 +8,7 @@ use std::time::Instant;
 use bytes::Bytes;
 use http::header::{CONNECTION, UPGRADE};
 use http_body_util::combinators::BoxBody;
-use hyper::{body::Incoming, Method, StatusCode};
+use hyper::{Method, StatusCode};
 use hyper::{Request, Response};
 
 use crate::cache::{Cache, CacheEntry, CloneableRes};
@@ -21,7 +21,7 @@ use crate::{cfg_logging, UpstreamAndConnPool, Upstreams};
     tracing::instrument(level = "trace", skip(req, config, cache))
 )]
 pub(crate) async fn handle_req(
-    req: Request<hyper::body::Incoming>,
+    req: Request<BoxBody<Bytes, crate::Error>>,
     peer_addr: SocketAddr,
     domain: Option<Arc<str>>,
     config: Arc<Config>,
@@ -63,7 +63,7 @@ pub(crate) async fn handle_req(
     tracing::instrument(level = "trace", skip(req, cache, peer_addr))
 )]
 async fn handle_match(
-    mut req: Request<Incoming>,
+    mut req: Request<BoxBody<Bytes, crate::Error>>,
     peer_addr: SocketAddr,
     rule: &Rule,
     upstream: &UpstreamAndConnPool,
@@ -158,7 +158,7 @@ async fn handle_match(
     let req_uri = req.uri().clone();
     let mut send_req = upstream.1.get_sender().await?;
     let resp = util::proxy_request(req, &upstream.0, &mut send_req, peer_addr, false).await;
-    
+
     // Send back to poool ASAP
     drop(send_req);
     cfg_logging! {

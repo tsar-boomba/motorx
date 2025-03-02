@@ -23,6 +23,8 @@ pub mod log;
 mod cache;
 #[cfg(test)]
 mod e2e;
+#[cfg(feature = "h3")]
+mod h3;
 mod listener;
 #[cfg(feature = "tls")]
 pub mod tls;
@@ -32,11 +34,16 @@ pub mod tls;
 extern crate tracing;
 
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use cache::Cache;
 use config::Upstream;
 use conn_pool::Pool;
+use futures_util::future::join;
+use futures_util::TryStreamExt;
+use handle::handle_req;
+use http::Response;
+use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::Request;
@@ -72,34 +79,40 @@ pub struct Server {
     config: Arc<Config>,
     cache: Arc<Cache>,
     upstreams: Arc<Upstreams>,
-    listener: Listener,
+    listener: Mutex<Option<Listener>>,
+    #[cfg(feature = "h3")]
+    h3_listener: Mutex<Option<h3::Listener>>,
     /// Used to enforce max num of connections to this server
     semaphore: Arc<Semaphore>,
 }
 
 impl Server {
-    /// Do configuration shared between raw and tls servers
-    fn common_config(
-        mut config: Config,
-    ) -> Result<(Arc<Config>, Arc<Cache>, Arc<Upstreams>, Listener), Error> {
+    pub fn new(mut config: Config) -> Result<Self, Error> {
         let upstreams = Arc::new(init_upstreams(&mut config));
         let cache = Arc::new(Cache::from_config(&mut config));
 
         config.rules.sort_by(|a, b| a.path.cmp(&b.path));
         let config = Arc::new(config);
+        let listener = Listener::from_config(&config)?;
+
+        #[cfg(feature = "h3")]
+        let h3_listener = Mutex::new({
+            if let Some(_) = config.h3_addr {
+                // Only start h3 if the address is set and TLS is enabled
+
+                if let Some(server_config) = listener.server_config() {
+                    Some(h3::Listener::new(config.clone(), &server_config))
+                } else {
+                    tracing::warn!("Not starting h3 server since TLS isn't enabled.");
+                    None
+                }
+            } else {
+                tracing::warn!("No address for h3 server.");
+                None
+            }
+        });
 
         cfg_logging! {debug!("Starting with config: {:#?}", *config);}
-
-        Ok((
-            config.clone(),
-            cache,
-            upstreams,
-            Listener::from_config(&config)?,
-        ))
-    }
-
-    pub fn new(config: Config) -> Result<Self, Error> {
-        let (config, cache, conn_pools, listener) = Self::common_config(config)?;
 
         cfg_logging! {
             info!("Motorx proxy listening on http://{}", {
@@ -110,20 +123,64 @@ impl Server {
         Ok(Self {
             semaphore: Arc::new(Semaphore::new(config.max_connections)),
             cache,
-            upstreams: conn_pools,
+            upstreams,
             config,
-            listener,
+            listener: Mutex::new(Some(listener)),
+            h3_listener,
         })
     }
 
     pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
-        self.listener.local_addr()
+        self.listener
+            .lock()
+            .unwrap()
+            .as_ref()
+            .expect("cannot call after run")
+            .local_addr()
     }
 
-    pub async fn run(mut self) -> Result<(), hyper::Error> {
+    pub fn h3_local_addr(&self) -> Option<std::io::Result<SocketAddr>> {
+        self.h3_listener
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|listener| listener.local_addr())
+    }
+
+    pub async fn run(self) -> Result<(), crate::Error> {
+        let tcp_task = self.run_tcp();
+        let h3_task = self.run_h3();
+
+        let (tcp_task_res, h3_task_res) = join(tcp_task, h3_task).await;
+
+        match (tcp_task_res, h3_task_res) {
+            (Ok(_), Ok(_)) => Ok(()),
+            (Ok(_), Err(err)) => {
+                tracing::error!("TCP serve failed with: {err:?}");
+                Err(err)
+            }
+            (Err(err), Ok(_)) => {
+                tracing::error!("h3 serve failed with: {err:?}");
+                Err(err)
+            }
+            (Err(tcp_err), Err(h3_err)) => {
+                tracing::error!("TCP serve failed with: {tcp_err:?}");
+                tracing::error!("h3 serve failed with: {h3_err:?}");
+                Err(tcp_err)
+            }
+        }
+    }
+
+    async fn run_tcp(&self) -> Result<(), crate::Error> {
+        let mut listener = self
+            .listener
+            .lock()
+            .unwrap()
+            .take()
+            .expect("cannot call run twice");
         loop {
             if let Ok(permit) = self.semaphore.clone().acquire_owned().await {
-                match self.listener.accept().await {
+                match listener.accept().await {
                     Ok((stream, peer_addr)) => {
                         cfg_logging! {
                             trace!("Accepted connection from {}", peer_addr);
@@ -146,6 +203,83 @@ impl Server {
                         }
                     }
                 }
+            }
+        }
+    }
+
+    async fn run_h3(&self) -> Result<(), crate::Error> {
+        let Some(mut h3_listener) = self.h3_listener.lock().unwrap().take() else {
+            tracing::info!("Not starting h3 server.");
+            return Ok(());
+        };
+        tracing::info!("h3 on: https://{}", h3_listener.local_addr()?);
+
+        loop {
+            if let Ok(permit) = self.semaphore.clone().acquire_owned().await {
+                tracing::trace!("Accepting h3 conn...");
+                let mut conn = match h3_listener.accept().await {
+                    Ok(conn) => conn,
+                    Err(err) => {
+                        tracing::error!("Error accepting h3 conn: {err:?}");
+                        println!("h3 connection failed: {err:?}");
+                        continue;
+                    },
+                };
+                let peer_addr = conn.peer_addr();
+                let server_name = conn.server_name();
+                let config = self.config.clone();
+                let cache = self.cache.clone();
+                let upstreams = self.upstreams.clone();
+
+                tokio::spawn(async move {
+                    loop {
+                        let (req, mut send_res) = match conn.accept().await {
+                            Ok(Some((req, send_res))) => (req, send_res),
+                            Ok(None) => break,
+                            Err(err) => {
+                                tracing::error!("Error handling h3 conn: {err:?}");
+                                break;
+                            }
+                        };
+                        let server_name = server_name.clone();
+                        let config = config.clone();
+                        let cache = cache.clone();
+                        let upstreams = upstreams.clone();
+
+                        tokio::spawn(async move {
+                            let res = match handle_req(
+                                req,
+                                peer_addr,
+                                server_name,
+                                config,
+                                cache,
+                                upstreams,
+                            )
+                            .await
+                            {
+                                Ok(res) => res,
+                                Err(err) => {
+                                    tracing::error!("Error handling request: {err:?}");
+                                    return Ok::<_, crate::Error>(());
+                                }
+                            };
+
+                            let (head, body) = res.into_parts();
+                            send_res
+                                .send_response(Response::from_parts(head, ()))
+                                .await?;
+                            let mut body_stream = body.into_data_stream();
+
+                            while let Some(frame) = body_stream.try_next().await? {
+                                send_res.send_data(frame).await?;
+                            }
+
+                            send_res.finish().await.map_err(Into::into)
+                        });
+                    }
+
+                    drop(permit);
+                });
             }
         }
     }
@@ -173,7 +307,7 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
 
             async move {
                 let res = handle::handle_req(
-                    req,
+                    req.map(|incoming| incoming.map_err(Error::from).boxed()),
                     peer_addr,
                     domain,
                     Arc::clone(&config),

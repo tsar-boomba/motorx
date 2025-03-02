@@ -24,6 +24,7 @@ use tokio::{
     select,
     sync::mpsc,
 };
+use tracing::level_filters::LevelFilter;
 use tracing_subscriber::EnvFilter;
 
 use crate::{
@@ -203,7 +204,11 @@ pub fn tracing() {
 
     if !INITIALIZED.swap(true, Ordering::Relaxed) {
         tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::from_default_env())
+            .with_env_filter(
+                EnvFilter::builder()
+                    .with_default_directive(LevelFilter::DEBUG.into())
+                    .from_env_lossy(),
+            )
             .init();
     }
 }
@@ -248,19 +253,35 @@ pub fn http2_file_tls_client(cert_pem: String) -> reqwest::Client {
         .unwrap()
 }
 
+pub fn h3_file_tls_client(cert_pem: String, h3_port: u16) -> reqwest::Client {
+    base_file_tls_client(cert_pem)
+        .resolve_to_addrs(
+            "igamble.sus",
+            &[format!("[::1]:{}", h3_port).parse().unwrap()],
+        )
+        .http3_prior_knowledge()
+        .build()
+        .unwrap()
+}
+
 pub struct CertKeyFiles {
     pub cert_file: NamedTempFile,
     pub key_file: NamedTempFile,
 }
 
 pub fn gen_self_signed() -> CertKeyFiles {
+    gen_self_signed_w_names(&["localhost"])
+}
+
+pub fn gen_self_signed_w_names(names: &[&str]) -> CertKeyFiles {
     let key_pair = KeyPair::generate().unwrap();
-    let cert = CertificateParams::new(["localhost".into()])
+    let cert = CertificateParams::new(names.iter().map(ToString::to_string).collect::<Vec<_>>())
         .unwrap()
         .self_signed(&key_pair)
         .unwrap();
 
     let mut cert_file = NamedTempFile::new().unwrap();
+    println!("{}", cert.pem());
     cert_file.write_all(cert.pem().as_bytes()).unwrap();
 
     let mut key_file = NamedTempFile::new().unwrap();

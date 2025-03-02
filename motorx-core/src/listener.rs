@@ -1,8 +1,9 @@
 use std::{io, net::SocketAddr, pin::Pin, sync::Arc};
 
+use futures_util::StreamExt;
 use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    net::TcpStream,
+    io::{AsyncRead, AsyncWrite, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
 };
 
 use crate::{config::Tls, Config};
@@ -12,20 +13,12 @@ pub(crate) enum Listener {
     #[cfg(feature = "tls")]
     FileTls(tokio::net::TcpListener, Arc<rustls::ServerConfig>),
     #[cfg(feature = "tls")]
-    AcmeTls(
-        rustls_acme::tokio::TokioIncoming<
-            tokio_util::compat::Compat<TcpStream>,
-            io::Error,
-            rustls_acme::tokio::TokioIncomingTcpWrapper<
-                TcpStream,
-                io::Error,
-                tokio_stream::wrappers::TcpListenerStream,
-            >,
-            io::Error,
-            io::Error,
-        >,
-        SocketAddr,
-    ),
+    AcmeTls {
+        listener: TcpListener,
+        challenge_config: Arc<rustls::ServerConfig>,
+        server_config: Arc<rustls::ServerConfig>,
+        local_addr: SocketAddr,
+    },
 }
 
 pub(crate) enum Stream {
@@ -33,14 +26,7 @@ pub(crate) enum Stream {
     #[cfg(feature = "tls")]
     FileTls(crate::tls::stream::TlsStream),
     #[cfg(feature = "tls")]
-    AcmeTls(
-        tokio_util::compat::Compat<
-            rustls_acme::futures_rustls::server::TlsStream<
-                tokio_util::compat::Compat<tokio::net::TcpStream>,
-            >,
-        >,
-        Arc<str>,
-    ),
+    AcmeTls(tokio_rustls::server::TlsStream<TcpStream>, Option<Arc<str>>),
 }
 
 impl Listener {
@@ -50,7 +36,6 @@ impl Listener {
             {
                 use crate::tls;
                 use rustls_acme::{caches::DirCache, AcmeConfig};
-                use tokio_stream::wrappers::TcpListenerStream;
 
                 match tls {
                     Tls::File { certs, private_key } => {
@@ -61,7 +46,7 @@ impl Listener {
                             // Load private key.
                             let key = tls::load_private_key(private_key).unwrap();
 
-                            rustls::crypto::ring::default_provider()
+                            rustls::crypto::aws_lc_rs::default_provider()
                                 .install_default()
                                 .unwrap();
 
@@ -83,15 +68,28 @@ impl Listener {
                         let listener = crate::tcp_listener(config.addr)?;
                         let local_addr = listener.local_addr()?;
                         let prod = !domains.contains(&"localhost".to_string());
-                        let tls_incoming = AcmeConfig::new(&**domains)
+                        let mut state = AcmeConfig::new(&**domains)
                             .cache(DirCache::new(cache_dir.clone()))
                             .directory_lets_encrypt(prod)
-                            .tokio_incoming(
-                                TcpListenerStream::new(listener),
-                                vec![b"h2".to_vec(), b"http/1.1".to_vec()],
-                            );
+                            .state();
+                        let challenge_config = state.challenge_rustls_config();
+                        let server_config = state.default_rustls_config();
 
-                        Ok(Self::AcmeTls(tls_incoming, local_addr))
+                        tokio::spawn(async move {
+                            loop {
+                                match state.next().await.unwrap() {
+                                    Ok(ok) => tracing::debug!("event: {:?}", ok),
+                                    Err(err) => tracing::error!("error: {:?}", err),
+                                }
+                            }
+                        });
+
+                        Ok(Self::AcmeTls {
+                            listener,
+                            challenge_config,
+                            server_config,
+                            local_addr,
+                        })
                     }
                 }
             }
@@ -109,7 +107,21 @@ impl Listener {
             #[cfg(feature = "tls")]
             Listener::FileTls(tcp_listener, _) => tcp_listener.local_addr(),
             #[cfg(feature = "tls")]
-            Listener::AcmeTls(_, local_addr) => Ok(*local_addr),
+            Listener::AcmeTls { local_addr, .. } => Ok(*local_addr),
+        }
+    }
+
+    #[cfg(feature = "tls")]
+    pub(crate) fn server_config(&self) -> Option<Arc<rustls::ServerConfig>> {
+        match self {
+            Listener::Plain(_) => None,
+            Listener::FileTls(_, server_config) => Some(server_config.clone()),
+            Listener::AcmeTls {
+                listener: _,
+                challenge_config: _,
+                server_config,
+                local_addr: _,
+            } => Some(server_config.clone()),
         }
     }
 
@@ -127,19 +139,34 @@ impl Listener {
                 Ok((Stream::FileTls(tls_stream), peer))
             }
             #[cfg(feature = "tls")]
-            Listener::AcmeTls(tokio_incoming, _) => {
-                use futures_util::StreamExt;
-                use tokio_util::compat::FuturesAsyncReadCompatExt;
+            Listener::AcmeTls {
+                listener,
+                challenge_config,
+                server_config,
+                local_addr: _local_addr,
+            } => loop {
+                let (stream, peer) = listener.accept().await?;
 
-                let stream = tokio_incoming
-                    .next()
-                    .await
-                    .expect("Listener closed unexpectedly")?
-                    .into_inner();
-                let peer = stream.get_ref().0.get_ref().peer_addr()?;
-                let domain = Arc::from(stream.get_ref().1.server_name().unwrap());
-                Ok((Stream::AcmeTls(stream.compat(), domain), peer))
-            }
+                let start_handshake =
+                    tokio_rustls::LazyConfigAcceptor::new(Default::default(), stream).await?;
+
+                if rustls_acme::is_tls_alpn_challenge(&start_handshake.client_hello()) {
+                    let challenge_config = challenge_config.clone();
+                    tokio::spawn(async move {
+                        tracing::info!("received TLS-ALPN-01 validation request");
+                        let mut tls = start_handshake.into_stream(challenge_config).await.unwrap();
+                        tls.shutdown().await.unwrap();
+                    });
+                } else {
+                    let domain = start_handshake.client_hello().server_name().map(Arc::from);
+                    let tls = start_handshake
+                        .into_stream(server_config.clone())
+                        .await
+                        .unwrap();
+
+                    return Ok((Stream::AcmeTls(tls, domain), peer));
+                }
+            },
         }
     }
 }
@@ -149,7 +176,7 @@ impl Stream {
         match self {
             Stream::Plain(_) => None,
             Stream::FileTls(_) => None,
-            Stream::AcmeTls(_, domain) => Some(domain.clone()),
+            Stream::AcmeTls(_, domain) => domain.clone(),
         }
     }
 }
@@ -169,13 +196,7 @@ impl AsyncRead for Stream {
                 <crate::TlsStream as tokio::io::AsyncRead>::poll_read(Pin::new(tls_stream), cx, buf)
             }
             #[cfg(feature = "tls")]
-            Stream::AcmeTls(tls_stream, _) => {
-                <tokio_util::compat::Compat<
-                    rustls_acme::futures_rustls::server::TlsStream<
-                        tokio_util::compat::Compat<tokio::net::TcpStream>,
-                    >,
-                > as AsyncRead>::poll_read(Pin::new(tls_stream), cx, buf)
-            }
+            Stream::AcmeTls(tls_stream, _) => Pin::new(tls_stream).poll_read(cx, buf),
         }
     }
 }
@@ -197,13 +218,7 @@ impl AsyncWrite for Stream {
                 buf,
             ),
             #[cfg(feature = "tls")]
-            Stream::AcmeTls(tls_stream, _) => {
-                <tokio_util::compat::Compat<
-                    rustls_acme::futures_rustls::server::TlsStream<
-                        tokio_util::compat::Compat<tokio::net::TcpStream>,
-                    >,
-                > as AsyncWrite>::poll_write(Pin::new(tls_stream), cx, buf)
-            }
+            Stream::AcmeTls(tls_stream, _) => Pin::new(tls_stream).poll_write(cx, buf),
         }
     }
 
@@ -220,13 +235,7 @@ impl AsyncWrite for Stream {
                 <crate::TlsStream as tokio::io::AsyncWrite>::poll_flush(Pin::new(tls_stream), cx)
             }
             #[cfg(feature = "tls")]
-            Stream::AcmeTls(tls_stream, _) => {
-                <tokio_util::compat::Compat<
-                    rustls_acme::futures_rustls::server::TlsStream<
-                        tokio_util::compat::Compat<tokio::net::TcpStream>,
-                    >,
-                > as AsyncWrite>::poll_flush(Pin::new(tls_stream), cx)
-            }
+            Stream::AcmeTls(tls_stream, _) => Pin::new(tls_stream).poll_flush(cx),
         }
     }
 
@@ -243,13 +252,27 @@ impl AsyncWrite for Stream {
                 <crate::TlsStream as tokio::io::AsyncWrite>::poll_shutdown(Pin::new(tls_stream), cx)
             }
             #[cfg(feature = "tls")]
-            Stream::AcmeTls(tls_stream, _) => {
-                <tokio_util::compat::Compat<
-                    rustls_acme::futures_rustls::server::TlsStream<
-                        tokio_util::compat::Compat<tokio::net::TcpStream>,
-                    >,
-                > as AsyncWrite>::poll_shutdown(Pin::new(tls_stream), cx)
-            }
+            Stream::AcmeTls(tls_stream, _) => Pin::new(tls_stream).poll_shutdown(cx),
+        }
+    }
+
+    fn is_write_vectored(&self) -> bool {
+        match self {
+            Stream::Plain(tcp_stream) => tcp_stream.is_write_vectored(),
+            Stream::FileTls(tls_stream) => tls_stream.is_write_vectored(),
+            Stream::AcmeTls(tls_stream, _) => tls_stream.is_write_vectored(),
+        }
+    }
+
+    fn poll_write_vectored(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        bufs: &[io::IoSlice<'_>],
+    ) -> std::task::Poll<Result<usize, io::Error>> {
+        match self.get_mut() {
+            Stream::Plain(tcp_stream) => Pin::new(tcp_stream).poll_write_vectored(cx, bufs),
+            Stream::FileTls(tls_stream) => Pin::new(tls_stream).poll_write_vectored(cx, bufs),
+            Stream::AcmeTls(tls_stream, _) => Pin::new(tls_stream).poll_write_vectored(cx, bufs),
         }
     }
 }

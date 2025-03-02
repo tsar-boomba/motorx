@@ -1,3 +1,5 @@
+use bytes::Bytes;
+use http_body_util::combinators::BoxBody;
 use tokio::{io::BufReader, net::TcpStream, sync::OwnedSemaphorePermit};
 
 use crate::{config::Proto, error::Error};
@@ -10,7 +12,7 @@ use std::{
     },
 };
 
-use http::{uri::Authority, Request, Response};
+use http::{uri::Authority, Request, Response, Version};
 use hyper::body::Incoming;
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use tokio::{
@@ -44,14 +46,14 @@ pub struct Pool {
 
 #[derive(Debug, Clone)]
 pub struct Http2SendRequest {
-    send_request: hyper::client::conn::http2::SendRequest<Incoming>,
+    send_request: hyper::client::conn::http2::SendRequest<BoxBody<Bytes, crate::Error>>,
     streams: Arc<AtomicUsize>,
     conn_in_pool: Arc<AtomicBool>,
 }
 
 #[derive(Debug)]
 pub enum SendRequest {
-    Http1(hyper::client::conn::http1::SendRequest<Incoming>),
+    Http1(hyper::client::conn::http1::SendRequest<BoxBody<Bytes, crate::Error>>),
     Http2(Http2SendRequest),
 }
 
@@ -78,20 +80,21 @@ impl Pool {
             receiver: Mutex::new(receiver),
             authority,
             max_buffer_size,
-            proto
+            proto,
         }
     }
 
     pub async fn get_sender(&self) -> Result<PooledConn, crate::Error> {
         // only return if the SendRequest's underlying connection exists still
         // loop until we get a send_request that meets this criteria
-        let mut receiver = self.receiver.lock().await;
         loop {
+            let mut receiver = self.receiver.lock().await;
             let semaphore = self.semaphore.clone();
             let conn = select! {
                 biased;
                 // If there is a conn in the queue already, use that first
                 send_req = receiver.recv() => {
+                    drop(receiver);
                     match self.validate_sender(send_req.unwrap()).await? {
                         Some(send_req) => {
                             tracing::trace!(
@@ -151,10 +154,14 @@ impl Pool {
                 } else {
                     // We can clone out of this conn and return the original to the pool
                     let return_sender = http2_sender.clone();
-                    self.sender
-                        .send(SendRequest::Http2(http2_sender))
-                        .await
-                        .unwrap();
+
+                    if !http2_sender.is_closed() {
+                        self.sender
+                            .send(SendRequest::Http2(http2_sender))
+                            .await
+                            .unwrap();
+                    }
+
                     SendRequest::Http2(return_sender)
                 }
             }
@@ -185,7 +192,7 @@ impl Pool {
             Proto::Http1 => {
                 let (send_req, conn) = hyper::client::conn::http1::Builder::new()
                     .preserve_header_case(true)
-                    .handshake::<_, Incoming>(TokioIo::new(stream))
+                    .handshake(TokioIo::new(stream))
                     .await?;
 
                 let conn_span = info_span!("http1_conn_driver");
@@ -209,7 +216,7 @@ impl Pool {
                         .initial_max_send_streams(self.h2_max_streams)
                         .timer(TokioTimer::new())
                         .max_send_buf_size(self.max_buffer_size)
-                        .handshake::<_, Incoming>(TokioIo::new(stream))
+                        .handshake(TokioIo::new(stream))
                         .await?;
 
                 let conn_span = info_span!("h2_conn_driver");
@@ -260,11 +267,16 @@ impl SendRequest {
 
     pub async fn send_request(
         &mut self,
-        req: Request<Incoming>,
+        mut req: Request<BoxBody<Bytes, crate::Error>>,
     ) -> Result<Response<Incoming>, hyper::Error> {
         match self {
-            SendRequest::Http1(send_request) => send_request.send_request(req).await,
-            SendRequest::Http2(send_request) => send_request.send_request(req).await,
+            SendRequest::Http1(send_request) => {
+                *req.version_mut() = Version::HTTP_11;
+                send_request.send_request(req).await
+            }
+            SendRequest::Http2(send_request) => {
+                send_request.send_request(req).await
+            }
         }
     }
 
@@ -329,7 +341,7 @@ impl Drop for PooledConn {
 }
 
 impl Deref for Http2SendRequest {
-    type Target = hyper::client::conn::http2::SendRequest<Incoming>;
+    type Target = hyper::client::conn::http2::SendRequest<BoxBody<Bytes, crate::Error>>;
 
     fn deref(&self) -> &Self::Target {
         &self.send_request

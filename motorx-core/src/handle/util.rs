@@ -3,7 +3,7 @@ use std::net::SocketAddr;
 use bytes::Bytes;
 use http::{header::HOST, HeaderValue, Request, Response, StatusCode};
 use http_body_util::{combinators::BoxBody, BodyExt, Empty, Full};
-use hyper::{body::Incoming, client};
+use hyper::client;
 use hyper_util::rt::TokioIo;
 
 use crate::{
@@ -136,7 +136,7 @@ pub(crate) async fn read_body<B: BodyExt, E>(body: B) -> Result<Bytes, B::Error>
 }
 
 pub(crate) async fn proxy_request(
-    mut req: Request<Incoming>,
+    mut req: Request<BoxBody<Bytes, crate::Error>>,
     upstream: &Upstream,
     send_req: &mut SendRequest,
     peer_addr: SocketAddr,
@@ -150,7 +150,7 @@ pub(crate) async fn proxy_request(
     }
 
     if let Err(e) = send_req.ready().await {
-        cfg_logging!{
+        cfg_logging! {
             println!("Upstream connection unexpectedly closed: {e:?}");
         }
         return bad_gateway();
@@ -159,7 +159,7 @@ pub(crate) async fn proxy_request(
     let resp = match send_req.send_request(req).await {
         Ok(resp) => resp,
         Err(err) => {
-            cfg_logging! {error!("Failed to proxy request to {}: {err}", upstream.addr);};
+            cfg_logging! {error!("Failed to proxy request to {}: {err:?}", upstream.addr);};
             return bad_gateway();
         }
     };

@@ -17,4 +17,8 @@ pub enum Error {
     #[cfg(feature = "tls")]
     #[error("Rustls error: {0:?}")]
     Rustls(#[from] rustls::Error),
+
+    #[cfg(feature = "h3")]
+    #[error("h3 error: {0:?}")]
+    H3(#[from] s2n_quic_h3::h3::Error),
 }

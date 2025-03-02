@@ -1,7 +1,7 @@
 use std::{borrow::Cow, collections::HashMap, hash::Hash, time::Duration};
 
-use http::{header::HOST, Method};
-use hyper::{body::Incoming, Request};
+use http::Method;
+use hyper::Request;
 
 use crate::cfg_logging;
 
@@ -32,12 +32,12 @@ pub struct Rule {
 }
 
 impl Rule {
-    pub fn matches(&self, req: &Request<Incoming>, sni_host: Option<&str>) -> bool {
+    pub fn matches<B>(&self, req: &Request<B>, sni_host: Option<&str>) -> bool {
         // reject requests that have a different host header than what we got from sni
         if let Some(sni_host) = sni_host {
             let Some(host) = req.uri().host() else {
                 cfg_logging! {
-                    tracing::warn!("Request missing HOST header!");
+                    tracing::warn!("Request missing host");
                 }
                 return false;
             };

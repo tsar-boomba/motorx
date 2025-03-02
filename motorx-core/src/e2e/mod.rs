@@ -3,9 +3,9 @@ use std::{fs, sync::Arc, time::Duration};
 use bytes::Bytes;
 use http::{
     header::{CONNECTION, UPGRADE},
-    Request, Response, StatusCode,
+    Request, Response, StatusCode, Version,
 };
-use http_body_util::{BodyExt, Empty};
+use http_body_util::{BodyExt, Empty, Full};
 use hyper::client;
 use hyper_util::rt::TokioIo;
 use maplit::hashmap;
@@ -306,7 +306,6 @@ async fn h2_upstream() {
     let server_uri = format!("http://{}", server.local_addr().unwrap());
     tokio::spawn(async move {
         server.run().await.unwrap();
-        println!("server task eneded!!");
     });
     let client = utils::client();
 
@@ -323,4 +322,102 @@ async fn h2_upstream() {
 
     assert_eq!(upstream.requests_received().await.len(), 3);
     assert_eq!(upstream.connections_accepted(), 1);
+}
+
+#[tokio::test]
+async fn simple_h3_http1_upstream() {
+    utils::tracing();
+    let CertKeyFiles {
+        cert_file,
+        key_file,
+    } = utils::gen_self_signed();
+
+    let mut upstream = TestUpstream::new(|_| async move {
+        Response::builder()
+            .body(Full::new(Bytes::from_static(b"hi from upstream")).boxed())
+            .unwrap()
+    })
+    .await;
+
+    let config = Config {
+        tls: Some(Tls::File {
+            certs: cert_file.path().to_str().unwrap().into(),
+            private_key: key_file.path().to_str().unwrap().into(),
+        }),
+        addr: "127.0.0.1:0".parse().unwrap(),
+        h3_addr: Some("[::1]:0".parse().unwrap()),
+        upstreams: hashmap! {
+            upstream.id().to_string() => upstream.as_upstream()
+        },
+        rules: vec![start_rule("/", &upstream, false)],
+        ..Default::default()
+    };
+    let server = Server::new(config).unwrap();
+    let h3_port = server.h3_local_addr().unwrap().unwrap().port();
+    let server_uri = format!("https://localhost:{}", h3_port);
+    tokio::spawn(async move {
+        server.run().await.unwrap();
+    });
+    let client = utils::h3_file_tls_client(fs::read_to_string(cert_file.path()).unwrap(), h3_port);
+
+    let res = client
+        .get(server_uri)
+        .version(Version::HTTP_3)
+        .body("hello h3!")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(&*res.bytes().await.unwrap(), b"hi from upstream");
+
+    let upstream_req = &upstream.requests_received().await[0];
+    assert_eq!(upstream_req.body(), "hello h3!");
+}
+
+#[tokio::test]
+async fn simple_h3_h2_upstream() {
+    utils::tracing();
+    let CertKeyFiles {
+        cert_file,
+        key_file,
+    } = utils::gen_self_signed();
+
+    let mut upstream = TestUpstream::new(|_| async move {
+        Response::builder()
+            .body(Full::new(Bytes::from_static(b"hi from upstream")).boxed())
+            .unwrap()
+    })
+    .await;
+
+    let config = Config {
+        tls: Some(Tls::File {
+            certs: cert_file.path().to_str().unwrap().into(),
+            private_key: key_file.path().to_str().unwrap().into(),
+        }),
+        addr: "127.0.0.1:0".parse().unwrap(),
+        h3_addr: Some("[::1]:0".parse().unwrap()),
+        upstreams: hashmap! {
+            upstream.id().to_string() => upstream.as_h2_upstream()
+        },
+        rules: vec![start_rule("/", &upstream, false)],
+        ..Default::default()
+    };
+    let server = Server::new(config).unwrap();
+    let h3_port = server.h3_local_addr().unwrap().unwrap().port();
+    let server_uri = format!("https://localhost:{}", h3_port);
+    tokio::spawn(async move {
+        server.run().await.unwrap();
+    });
+    let client = utils::h3_file_tls_client(fs::read_to_string(cert_file.path()).unwrap(), h3_port);
+
+    let res = client
+        .get(server_uri)
+        .version(Version::HTTP_3)
+        .body("hello h3!")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(&*res.bytes().await.unwrap(), b"hi from upstream");
+
+    let upstream_req = &upstream.requests_received().await[0];
+    assert_eq!(upstream_req.body(), "hello h3!");
 }

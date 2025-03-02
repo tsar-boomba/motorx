@@ -3,7 +3,6 @@ use std::net::SocketAddr;
 use bytes::Bytes;
 use http::{Request, Response};
 use http_body_util::{combinators::BoxBody, Empty};
-use hyper::body::Incoming;
 use hyper_util::rt::TokioIo;
 
 use crate::{cfg_logging, config::Proto, UpstreamAndConnPool};
@@ -11,7 +10,7 @@ use crate::{cfg_logging, config::Proto, UpstreamAndConnPool};
 use super::util;
 
 pub(crate) async fn handle_upgrade(
-    req: Request<Incoming>,
+    req: Request<BoxBody<Bytes, crate::Error>>,
     upstream: &UpstreamAndConnPool,
     peer_addr: SocketAddr,
 ) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {

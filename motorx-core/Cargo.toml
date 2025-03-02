@@ -28,7 +28,7 @@ slab = "0.4.9"
 itertools = "0.14.0"
 
 # logging feature
-tracing = { workspace = true, optional = true }
+tracing = { workspace = true }
 
 # tls feature
 rustls-native-certs = { version = "0.8.1", optional = true }
@@ -45,8 +45,14 @@ serde = { version = "1.0.217", features = ["derive", "rc"], optional = true }
 serde_json = { version = "1.0.137", optional = true }
 http-serde = { version = "2.1.1", optional = true }
 
+# h3 feature
+# s2n v1.54.0
+s2n-quic-core = { optional = true, git = "https://github.com/aws/s2n-quic.git", rev = "65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a", default-features = false, features = ["state-tracing", "branch-tracing", "event-tracing", "probe-tracing"] }
+s2n-quic = { optional = true, git = "https://github.com/aws/s2n-quic.git", rev = "65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a", default-features = false, features = ["provider-address-token-default", "provider-tls-rustls"] }
+s2n-quic-h3 = { optional = true, git = "https://github.com/aws/s2n-quic.git", rev = "65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a", features = ["tracing"] }
+
 [dev-dependencies]
-reqwest = { version = "0.12.12", features = ["rustls-tls"] } # to send request to proxy in tests
+reqwest = { version = "0.12.12", features = ["rustls-tls", "http3"] } # to send request to proxy in tests
 tokio = { workspace = true, features = ["full"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 rcgen = { version = "0.13.2" }
@@ -54,10 +60,12 @@ tempfile = "3.15.0"
 maplit = "1.0.2"
 
 [features]
-full = ["logging", "serde-config", "tls"]
+full = ["logging", "serde-config", "tls", "h3"]
 
-logging = ["tracing"]
+logging = []
 
 serde-config = ["serde", "serde_json", "http-serde"]
 
 tls = ["rustls", "rustls-native-certs", "rustls-pemfile", "tokio-rustls", "webpki-roots", "futures-util", "rustls-acme", "tokio-stream"]
+
+h3 = ["tls", "s2n-quic-core", "s2n-quic", "s2n-quic-h3"]

@@ -14,6 +14,12 @@ use self::authentication::Authentication;
 #[derive(Debug)]
 pub struct Config {
     pub addr: SocketAddr,
+    #[cfg(feature = "h3")]
+    #[cfg_attr(
+        feature = "serde-config",
+        serde(default)
+    )]
+    pub h3_addr: Option<SocketAddr>,
     pub tls: Option<Tls>,
     pub rules: Vec<Rule>,
     pub upstreams: HashMap<String, Arc<Upstream>>,
@@ -107,6 +113,8 @@ impl Default for Config {
             client_buffer_size: default_client_buffer_size(),
             rules: Vec::new(),
             upstreams: HashMap::new(),
+            #[cfg(feature = "h3")]
+            h3_addr: None,
         }
     }
 }
