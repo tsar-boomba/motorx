@@ -34,6 +34,7 @@ pub mod tls;
 extern crate tracing;
 
 use std::net::SocketAddr;
+use std::sync::atomic::AtomicU16;
 use std::sync::{Arc, Mutex};
 
 use cache::Cache;
@@ -42,7 +43,8 @@ use conn_pool::Pool;
 use futures_util::future::join;
 use futures_util::TryStreamExt;
 use handle::handle_req;
-use http::Response;
+use http::header::ALT_SVC;
+use http::{HeaderValue, Response};
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper::service::service_fn;
@@ -126,6 +128,7 @@ impl Server {
             upstreams,
             config,
             listener: Mutex::new(Some(listener)),
+            #[cfg(feature = "h3")]
             h3_listener,
         })
     }
@@ -223,7 +226,7 @@ impl Server {
                         tracing::error!("Error accepting h3 conn: {err:?}");
                         println!("h3 connection failed: {err:?}");
                         continue;
-                    },
+                    }
                 };
                 let peer_addr = conn.peer_addr();
                 let server_name = conn.server_name();
@@ -298,6 +301,7 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     conn_pools: Arc<Upstreams>,
     permit: OwnedSemaphorePermit,
 ) {
+    let h3_port = config.h3_addr.map(|s| s.port());
     let service = service_fn({
         move |req: Request<Incoming>| {
             let domain = domain.clone();
@@ -306,7 +310,7 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
             let conn_pools = conn_pools.clone();
 
             async move {
-                let res = handle::handle_req(
+                let mut res = handle::handle_req(
                     req.map(|incoming| incoming.map_err(Error::from).boxed()),
                     peer_addr,
                     domain,
@@ -318,6 +322,21 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
 
                 cfg_logging! {
                     trace!("Responded to req from {}", peer_addr);
+                }
+
+                #[cfg(feature = "h3")]
+                {
+                    // add alt-svc header so client know we support h3
+                    if config.will_start_h3() {
+                        res = res.map(|mut res| {
+                            res.headers_mut().insert(
+                                ALT_SVC,
+                                HeaderValue::try_from(format!("h3=:{};ma=10080", h3_port.unwrap()))
+                                    .unwrap(),
+                            );
+                            res
+                        });
+                    }
                 }
 
                 res

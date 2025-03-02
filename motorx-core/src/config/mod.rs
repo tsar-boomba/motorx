@@ -119,6 +119,12 @@ impl Default for Config {
     }
 }
 
+impl Config {
+    pub(crate) fn will_start_h3(&self) -> bool {
+        self.h3_addr.is_some() && matches!(self.tls, Some(Tls::Acme { .. } | Tls::File { .. }))
+    }
+}
+
 #[cfg(feature = "serde-config")]
 impl FromStr for Config {
     type Err = serde_json::Error;
