@@ -218,7 +218,6 @@ impl Server {
 
         loop {
             if let Ok(permit) = self.semaphore.clone().acquire_owned().await {
-                tracing::trace!("Accepting h3 conn...");
                 let mut conn = match h3_listener.accept().await {
                     Ok(conn) => conn,
                     Err(err) => {
@@ -331,7 +330,7 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                         res = res.map(|mut res| {
                             res.headers_mut().insert(
                                 ALT_SVC,
-                                HeaderValue::try_from(format!("h3=\":{}\"; ma=10080; persist=1", h3_port.unwrap()))
+                                HeaderValue::try_from(format!("h3=\":{}\"; ma=2592000; persist=1", h3_port.unwrap()))
                                     .unwrap(),
                             );
                             res
