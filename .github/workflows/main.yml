@@ -45,6 +45,9 @@ jobs:
       - uses: taiki-e/install-action@nextest
       - name: Run Tests
         uses: actions-rs/cargo@v1
+        env:
+          RUST_LOG: 'debug'
+          RUSTFLAGS: '--cfg reqwest_unstable' 
         with:
           command: nextest
           args: run --all-features --workspace

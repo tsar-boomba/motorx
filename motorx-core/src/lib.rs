@@ -34,7 +34,6 @@ pub mod tls;
 extern crate tracing;
 
 use std::net::SocketAddr;
-use std::sync::atomic::AtomicU16;
 use std::sync::{Arc, Mutex};
 
 use cache::Cache;
@@ -327,11 +326,12 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 #[cfg(feature = "h3")]
                 {
                     // add alt-svc header so client know we support h3
+                    // TODO: make the max-age, persist configurable. I'm never turning it off so I don't care
                     if config.will_start_h3() {
                         res = res.map(|mut res| {
                             res.headers_mut().insert(
                                 ALT_SVC,
-                                HeaderValue::try_from(format!("h3=:{};ma=10080", h3_port.unwrap()))
+                                HeaderValue::try_from(format!("h3=\":{}\"; ma=10080; persist=1", h3_port.unwrap()))
                                     .unwrap(),
                             );
                             res
