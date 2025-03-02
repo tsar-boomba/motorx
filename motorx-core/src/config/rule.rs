@@ -1,9 +1,7 @@
 use std::{borrow::Cow, collections::HashMap, hash::Hash, time::Duration};
 
-use http::Method;
+use http::{header::HOST, Method};
 use hyper::Request;
-
-use crate::cfg_logging;
 
 use super::match_type::MatchType;
 
@@ -35,19 +33,23 @@ impl Rule {
     pub fn matches<B>(&self, req: &Request<B>, sni_host: Option<&str>) -> bool {
         // reject requests that have a different host header than what we got from sni
         if let Some(sni_host) = sni_host {
-            let Some(host) = req.uri().host() else {
-                cfg_logging! {
-                    tracing::warn!("Request missing host");
-                }
-                return false;
+            let host = match req.uri().host() {
+                Some(host) => host.as_bytes(),
+                None => match req.headers().get(HOST) {
+                    Some(host_header) => host_header.as_bytes(),
+                    None => {
+                        tracing::warn!("Request missing host");
+                        return false;
+                    },
+                },
             };
 
-            if host != sni_host {
+            if host != sni_host.as_bytes() {
                 return false;
             }
 
             if let Some(expected_host) = self.host.as_deref() {
-                if host != expected_host {
+                if host != expected_host.as_bytes() {
                     return false;
                 }
             }
