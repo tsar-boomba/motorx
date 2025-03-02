@@ -151,18 +151,12 @@ impl Listener {
                     tokio_rustls::LazyConfigAcceptor::new(Default::default(), stream).await?;
 
                 if rustls_acme::is_tls_alpn_challenge(&start_handshake.client_hello()) {
-                    let challenge_config = challenge_config.clone();
-                    tokio::spawn(async move {
-                        tracing::info!("received TLS-ALPN-01 validation request");
-                        let mut tls = start_handshake.into_stream(challenge_config).await.unwrap();
-                        tls.shutdown().await.unwrap();
-                    });
+                    tracing::info!("received TLS-ALPN-01 validation request");
+                    let mut tls = start_handshake.into_stream(challenge_config.clone()).await?;
+                    tls.shutdown().await?;
                 } else {
                     let domain = start_handshake.client_hello().server_name().map(Arc::from);
-                    let tls = start_handshake
-                        .into_stream(server_config.clone())
-                        .await
-                        .unwrap();
+                    let tls = start_handshake.into_stream(server_config.clone()).await?;
 
                     return Ok((Stream::AcmeTls(tls, domain), peer));
                 }
