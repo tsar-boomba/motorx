@@ -288,7 +288,7 @@ impl Server {
 
 #[cfg_attr(
     feature = "logging",
-    tracing::instrument(skip(stream, config, cache, permit))
+    tracing::instrument(skip(stream, config, cache, conn_pools, permit))
 )]
 fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     stream: S,

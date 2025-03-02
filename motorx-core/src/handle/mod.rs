@@ -18,7 +18,7 @@ use crate::{cfg_logging, UpstreamAndConnPool, Upstreams};
 
 #[cfg_attr(
     feature = "logging",
-    tracing::instrument(level = "trace", skip(req, config, cache))
+    tracing::instrument(level = "trace", skip(req, config, cache, upstreams))
 )]
 pub(crate) async fn handle_req(
     req: Request<BoxBody<Bytes, crate::Error>>,
@@ -58,17 +58,13 @@ pub(crate) async fn handle_req(
         .unwrap())
 }
 
-#[cfg_attr(
-    feature = "logging",
-    tracing::instrument(level = "trace", skip(req, cache, peer_addr))
-)]
 async fn handle_match(
     mut req: Request<BoxBody<Bytes, crate::Error>>,
     peer_addr: SocketAddr,
     rule: &Rule,
     upstream: &UpstreamAndConnPool,
     cache: Arc<Cache>,
-    upstreams: &Upstreams,
+    _upstreams: &Upstreams,
     max_connections: usize,
 ) -> Result<Response<BoxBody<Bytes, crate::Error>>, crate::Error> {
     if Method::CONNECT == req.method() {

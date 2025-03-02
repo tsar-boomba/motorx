@@ -65,12 +65,13 @@ impl Listener {
 
     pub async fn accept(&mut self) -> Result<H3Connection, crate::Error> {
         let conn = self.server.accept().await.unwrap();
-        tracing::trace!("QUIC connection accepted");
+        let peer_addr = conn
+                .remote_addr()
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "missing remote addr"))?;
+        tracing::trace!("QUIC connection accepted from {peer_addr}");
 
         Ok(H3Connection {
-            peer_addr: conn
-                .remote_addr()
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "missing remote addr"))?,
+            peer_addr,
             server_name: conn
                 .server_name()
                 .map_err(|_| io::Error::new(io::ErrorKind::Other, "missing remote addr"))?
