@@ -2,11 +2,14 @@ mod upgrade;
 pub mod util;
 
 use std::net::SocketAddr;
+use std::str::FromStr;
 use std::sync::{Arc, Weak};
 use std::time::Instant;
 
 use bytes::Bytes;
 use http::header::{CONNECTION, UPGRADE};
+use http::uri::PathAndQuery;
+use http::Uri;
 use http_body_util::combinators::BoxBody;
 use hyper::{Method, StatusCode};
 use hyper::{Request, Response};
@@ -75,15 +78,22 @@ async fn handle_match(
             .unwrap());
     }
 
-    *req.uri_mut() = rule
-        .remove_match(
-            req.uri()
-                .path_and_query()
-                .map(|pq| pq.as_str())
-                .unwrap_or("/"),
+    let mut new_parts = http::uri::Parts::default();
+    new_parts.scheme = req.uri().scheme().cloned();
+    new_parts.authority = req.uri().authority().cloned();
+    new_parts.path_and_query = Some(
+        PathAndQuery::from_str(
+            &*rule.remove_match(
+                req.uri()
+                    .path_and_query()
+                    .map(|pq| pq.as_str())
+                    .unwrap_or("/"),
+            ),
         )
-        .parse()
-        .unwrap();
+        .map_err(|_| crate::Error::InvalidHost)?,
+    );
+
+    *req.uri_mut() = Uri::from_parts(new_parts).unwrap();
 
     // We got an upgrade request if:
     //   - the request has "connection" and "upgrade" headers
