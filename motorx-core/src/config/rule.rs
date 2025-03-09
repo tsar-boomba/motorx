@@ -81,11 +81,11 @@ impl Rule {
         true
     }
 
-    pub fn remove_match<'a>(&self, path: &'a str) -> Cow<'a, str> {
+    pub fn remove_match<'a>(&self, path_and_query: &'a str) -> Cow<'a, str> {
         if self.remove_match {
             match &self.path {
                 MatchType::Start(start) => {
-                    let mut new_path = path.replacen(start, "", 1);
+                    let mut new_path = path_and_query.replacen(start, "", 1);
 
                     if new_path.is_empty() {
                         new_path.push('/');
@@ -93,10 +93,10 @@ impl Rule {
 
                     new_path.into()
                 }
-                _ => path.into(),
+                _ => path_and_query.into(),
             }
         } else {
-            path.into()
+            path_and_query.into()
         }
     }
 }

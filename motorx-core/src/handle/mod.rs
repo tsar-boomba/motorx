@@ -75,7 +75,15 @@ async fn handle_match(
             .unwrap());
     }
 
-    *req.uri_mut() = rule.remove_match(req.uri().path()).parse().unwrap();
+    *req.uri_mut() = rule
+        .remove_match(
+            req.uri()
+                .path_and_query()
+                .map(|pq| pq.as_str())
+                .unwrap_or("/"),
+        )
+        .parse()
+        .unwrap();
 
     // We got an upgrade request if:
     //   - the request has "connection" and "upgrade" headers
