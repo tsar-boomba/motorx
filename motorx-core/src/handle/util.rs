@@ -145,9 +145,7 @@ pub(crate) async fn proxy_request(
     add_proxy_headers(&mut req, &upstream, peer_addr);
     remove_hop_headers(&mut req, upgrading);
 
-    cfg_logging! {
-        trace!("Proxying request: {:?}", req);
-    }
+    tracing::trace!("Proxying request: {:?}", req);
 
     if let Err(e) = send_req.ready().await {
         cfg_logging! {

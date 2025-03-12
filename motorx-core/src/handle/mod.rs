@@ -19,10 +19,7 @@ use crate::config::rule::Rule;
 use crate::config::Config;
 use crate::{cfg_logging, UpstreamAndConnPool, Upstreams};
 
-#[cfg_attr(
-    feature = "logging",
-    tracing::instrument(level = "trace", skip(req, config, cache, upstreams))
-)]
+#[tracing::instrument(level = "trace", skip(req, config, cache, upstreams))]
 pub(crate) async fn handle_req(
     req: Request<BoxBody<Bytes, crate::Error>>,
     peer_addr: SocketAddr,

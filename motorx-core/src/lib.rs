@@ -29,8 +29,7 @@ mod listener;
 #[cfg(feature = "tls")]
 pub mod tls;
 
-#[cfg_attr(feature = "logging", macro_use(info, error, debug, trace))]
-#[cfg(feature = "logging")]
+#[macro_use(info, error, debug, trace)]
 extern crate tracing;
 
 use std::future::Future;
@@ -49,7 +48,7 @@ use http_body_util::BodyExt;
 use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::Request;
-use hyper_util::rt::{TokioExecutor, TokioIo};
+use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use listener::Listener;
 #[cfg(feature = "tls")]
 use tls::stream::TlsStream;
@@ -196,9 +195,7 @@ impl Server {
                 if let Ok(permit) = semaphore.clone().acquire_owned().await {
                     match listener.accept().await {
                         Ok((stream, peer_addr)) => {
-                            cfg_logging! {
-                                trace!("Accepted connection from {}", peer_addr);
-                            }
+                            tracing::trace!("Accepted connection from {}", peer_addr);
                             let domain = stream.domain();
 
                             handle_connection(
@@ -314,10 +311,7 @@ impl Server {
     }
 }
 
-#[cfg_attr(
-    feature = "logging",
-    tracing::instrument(skip(stream, config, cache, conn_pools, permit))
-)]
+#[tracing::instrument(skip(stream, config, cache, conn_pools, permit))]
 fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     stream: S,
     peer_addr: SocketAddr,
@@ -378,7 +372,9 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
         cfg_logging! {
             trace!("Handling connection from {}", peer_addr);
         }
-        let conn_build = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+        let mut conn_build = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+        conn_build.http1().timer(TokioTimer::new());
+        conn_build.http2().timer(TokioTimer::new());
         if let Err(err) = conn_build
             .serve_connection_with_upgrades(TokioIo::new(stream), service)
             .await
