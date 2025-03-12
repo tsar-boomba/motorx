@@ -192,6 +192,7 @@ impl Server {
 
         async move {
             loop {
+                tracing::trace!("[tcp] {} permits left", semaphore.available_permits());
                 if let Ok(permit) = semaphore.clone().acquire_owned().await {
                     match listener.accept().await {
                         Ok((stream, peer_addr)) => {
@@ -242,6 +243,7 @@ impl Server {
             tracing::info!("h3 on: https://{}", h3_listener.local_addr()?);
 
             loop {
+                tracing::trace!("[h3] {} permits left", semaphore.available_permits());
                 if let Ok(permit) = semaphore.clone().acquire_owned().await {
                     let mut conn = match h3_listener.accept().await {
                         Ok(conn) => conn,
