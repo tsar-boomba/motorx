@@ -33,15 +33,17 @@ pub(crate) async fn handle_upgrade(
     let mut send_req = upstream.1.new_connection(None, Proto::Http1).await?;
     let mut res = util::proxy_request(client_req, &upstream.0, &mut send_req, peer_addr, true).await;
 
+    let buf_size = upstream.0.buffer_size;
     match hyper::upgrade::on(&mut res).await {
         Ok(upgraded_upstream) => {
             tokio::task::spawn(async move {
                 match hyper::upgrade::on(upgrade_req).await {
                     Ok(upgraded_client) => {
-                        // TODO: consider copy_bidirectional_with_sizes for configurability
-                        if let Err(err) = tokio::io::copy_bidirectional(
+                        if let Err(err) = tokio::io::copy_bidirectional_with_sizes(
                             &mut TokioIo::new(upgraded_client),
                             &mut TokioIo::new(upgraded_upstream),
+                            buf_size,
+                            buf_size
                         )
                         .await
                         {
