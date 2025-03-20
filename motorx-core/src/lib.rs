@@ -52,7 +52,7 @@ use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use listener::Listener;
 #[cfg(feature = "tls")]
 use tls::stream::TlsStream;
-use tokio::io::{AsyncRead, AsyncWrite, BufStream};
+use tokio::io::{AsyncRead, AsyncWrite, BufReader};
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 pub use config::{CacheSettings, Config, Rule};
@@ -153,7 +153,19 @@ impl Server {
         let tcp_task = tokio::spawn(self.run_tcp());
         let h3_task = tokio::spawn(self.run_h3());
 
-        let (tcp_task_res, h3_task_res) = join(tcp_task, h3_task).await;
+        let (tcp_task_res, h3_task_res) = join(
+            async move {
+                let res = tcp_task.await;
+                tracing::error!("TCP task ended! {res:?}");
+                res
+            },
+            async move {
+                let res = h3_task.await;
+                tracing::error!("H3 task ended! {res:?}");
+                res
+            },
+        )
+        .await;
 
         // Propagate panics in the tasks
         let tcp_task_res = tcp_task_res.unwrap();
@@ -199,7 +211,7 @@ impl Server {
                             let domain = stream.domain();
 
                             handle_connection(
-                                BufStream::with_capacity(8 * 1024, 8 * 1024, stream),
+                                BufReader::with_capacity(config.client_buffer_size, stream),
                                 peer_addr,
                                 domain,
                                 config.clone(),
@@ -210,7 +222,7 @@ impl Server {
                         }
                         Err(e) => {
                             cfg_logging! {
-                                error!("Error connecting, {:?}", e);
+                                error!("Error accepting, {:?}", e);
                             }
                         }
                     }
