@@ -30,28 +30,21 @@ pub struct Rule {
 }
 
 impl Rule {
-    pub fn matches<B>(&self, req: &Request<B>, sni_host: Option<&str>) -> bool {
-        // reject requests that have a different host header than what we got from sni
-        if let Some(sni_host) = sni_host {
-            let host = match req.uri().host() {
-                Some(host) => host.as_bytes(),
-                None => match req.headers().get(HOST) {
-                    Some(host_header) => host_header.as_bytes(),
-                    None => {
-                        tracing::warn!("Request missing host");
-                        return false;
-                    },
-                },
-            };
-
-            if host != sni_host.as_bytes() {
-                return false;
-            }
-
-            if let Some(expected_host) = self.host.as_deref() {
-                if host != expected_host.as_bytes() {
+    pub fn matches<B>(&self, req: &Request<B>) -> bool {
+        let host = match req.uri().host() {
+            Some(host) => host.as_bytes(),
+            None => match req.headers().get(HOST) {
+                Some(host_header) => host_header.as_bytes(),
+                None => {
+                    tracing::warn!("Request missing host");
                     return false;
                 }
+            },
+        };
+
+        if let Some(expected_host) = self.host.as_deref() {
+            if host != expected_host.as_bytes() {
+                return false;
             }
         }
 
