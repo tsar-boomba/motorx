@@ -52,6 +52,7 @@ pub(crate) async fn handle_req(
         }
     }
 
+    tracing::trace!("req didn't match any rules");
     Ok(Response::builder()
         .status(StatusCode::NOT_FOUND)
         .body(util::empty())

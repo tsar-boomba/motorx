@@ -146,6 +146,7 @@ impl Listener {
                 server_config,
                 local_addr: _local_addr,
             } => loop {
+                tracing::trace!("Accepting conenction with ACME...");
                 let (stream, peer) = listener.accept().await?;
 
                 let start_handshake =
@@ -153,9 +154,16 @@ impl Listener {
 
                 if rustls_acme::is_tls_alpn_challenge(&start_handshake.client_hello()) {
                     tracing::info!("received TLS-ALPN-01 validation request");
-                    let mut tls = start_handshake.into_stream(challenge_config.clone()).await?;
-                    tls.shutdown().await?;
+                    let mut tls = start_handshake
+                        .into_stream(challenge_config.clone())
+                        .await?;
+                    tokio::spawn(async move {
+                        if let Err(err) = tls.shutdown().await {
+                            tracing::error!("Error in ACME challenge conn: {err:?}")
+                        };
+                    });
                 } else {
+                    tracing::trace!("Accepting TLS connection...");
                     let domain = start_handshake.client_hello().server_name().map(Arc::from);
                     let tls = start_handshake.into_stream(server_config.clone()).await?;
 
