@@ -23,7 +23,7 @@ use crate::{cfg_logging, UpstreamAndConnPool, Upstreams};
 pub(crate) async fn handle_req(
     req: Request<BoxBody<Bytes, crate::Error>>,
     peer_addr: SocketAddr,
-    _domain: Option<Arc<str>>,
+    _conn_domain: Option<Arc<str>>,
     config: Arc<Config>,
     cache: Arc<Cache>,
     upstreams: Arc<Upstreams>,
