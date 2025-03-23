@@ -1,6 +1,7 @@
 {
 	"$schema": "schema.json",
 	"addr": "127.0.0.1:4000",
+	"prometheus_addr": "127.0.0.1:9001",
 	"rules": [
 		{
 			"path": {

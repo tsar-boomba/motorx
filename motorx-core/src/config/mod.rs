@@ -15,11 +15,11 @@ use self::authentication::Authentication;
 pub struct Config {
     pub addr: SocketAddr,
     #[cfg(feature = "h3")]
-    #[cfg_attr(
-        feature = "serde-config",
-        serde(default)
-    )]
+    #[cfg_attr(feature = "serde-config", serde(default))]
     pub h3_addr: Option<SocketAddr>,
+    #[cfg(feature = "prometheus")]
+    #[cfg_attr(feature = "prometheus", serde(default))]
+    pub prometheus_addr: Option<SocketAddr>,
     pub tls: Option<Tls>,
     pub rules: Vec<Rule>,
     pub upstreams: HashMap<String, Arc<Upstream>>,
@@ -51,10 +51,7 @@ pub struct Upstream {
         serde(default = "default_upstream_buffer_size")
     )]
     pub buffer_size: usize,
-    #[cfg_attr(
-        feature = "serde-config",
-        serde(default)
-    )]
+    #[cfg_attr(feature = "serde-config", serde(default))]
     pub proto: Proto,
     /// Upstreams key in a slab, it is overridden on startup
     #[cfg_attr(feature = "serde-config", serde(default))]
@@ -100,7 +97,6 @@ const fn default_client_buffer_size() -> usize {
     8 * 1024
 }
 
-
 impl Default for Config {
     fn default() -> Self {
         Self {
@@ -115,6 +111,8 @@ impl Default for Config {
             upstreams: HashMap::new(),
             #[cfg(feature = "h3")]
             h3_addr: None,
+            #[cfg(feature = "prometheus")]
+            prometheus_addr: None,
         }
     }
 }

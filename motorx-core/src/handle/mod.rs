@@ -13,11 +13,12 @@ use http::Uri;
 use http_body_util::combinators::BoxBody;
 use hyper::{Method, StatusCode};
 use hyper::{Request, Response};
+use util::bad_gateway;
 
 use crate::cache::{Cache, CacheEntry, CloneableRes};
 use crate::config::rule::Rule;
 use crate::config::Config;
-use crate::{cfg_logging, UpstreamAndConnPool, Upstreams};
+use crate::{UpstreamAndConnPool, Upstreams};
 
 #[tracing::instrument(level = "trace", skip(req, config, cache, upstreams))]
 pub(crate) async fn handle_req(
@@ -99,8 +100,10 @@ async fn handle_match(
     //   - "upgrade" is not empty
     let connection_header = req.headers().get(CONNECTION);
     let upgrade_header = req.headers().get(UPGRADE);
-    let upgrading = connection_header.is_some_and(|v| v.to_str().is_ok_and(|v| v.to_ascii_lowercase() == "upgrade"))
-        && upgrade_header.is_some_and(|v| !v.is_empty());
+    let upgrading = connection_header.is_some_and(|v| {
+        v.to_str()
+            .is_ok_and(|v| v.to_ascii_lowercase() == "upgrade")
+    }) && upgrade_header.is_some_and(|v| !v.is_empty());
 
     if upgrading {
         return upgrade::handle_upgrade(req, upstream, peer_addr).await;
@@ -121,7 +124,7 @@ async fn handle_match(
                 } = &*entry;
 
                 if let Some(cached_res) = entry.extract_fresh_data(cache_settings.max_age) {
-                    cfg_logging! {trace!("Cache hit for {}", req.uri());}
+                    tracing::trace!("Cache hit for {}", req.uri());
                     return Ok(cached_res);
                 }
 
@@ -130,7 +133,10 @@ async fn handle_match(
 
                 if let Some(inflight) = inflight.as_ref().and_then(Weak::upgrade) {
                     // request is inflight to update cache, wait for it
-                    cfg_logging! {trace!("No cache found for {}, waiting on inflight request...", req.uri());}
+                    tracing::trace!(
+                        "No cache found for {}, waiting on inflight request...",
+                        req.uri()
+                    );
 
                     // dont hold lock while waiting for inflight
                     if let Ok(Some(res)) = inflight.subscribe().recv().await {
@@ -142,7 +148,7 @@ async fn handle_match(
                     }
                 } else {
                     // cache needs to be updated
-                    cfg_logging! {debug!("Stale cache for {}, updating...", req.uri());}
+                    tracing::debug!("Stale cache for {}, updating...", req.uri());
                     Some(
                         cache
                             .insert_empty_entry(rule, req.uri(), max_connections)
@@ -151,7 +157,7 @@ async fn handle_match(
                 }
             } else {
                 // no cache, refresh
-                cfg_logging! {debug!("No cache found for {}, creating...", req.uri());}
+                tracing::debug!("No cache found for {}, creating...", req.uri());
                 Some(
                     cache
                         .insert_empty_entry(rule, req.uri(), max_connections)
@@ -168,14 +174,14 @@ async fn handle_match(
     };
 
     let req_uri = req.uri().clone();
-    let mut send_req = upstream.1.get_sender().await?;
+    let Ok(mut send_req) = upstream.1.get_sender().await else {
+        return Ok(bad_gateway());
+    };
     let resp = util::proxy_request(req, &upstream.0, &mut send_req, peer_addr, false).await;
 
     // Send back to poool ASAP
     drop(send_req);
-    cfg_logging! {
-        trace!("Got res from upstream {}", peer_addr);
-    }
+    tracing::trace!("Got res from upstream {}", peer_addr);
 
     if let Some(refresh_cache) = refresh_cache {
         // read response & clone to send one and save one for cache
@@ -227,9 +233,8 @@ async fn handle_match(
         Ok(resp)
     } else {
         // Just send response
-        cfg_logging! {
-            trace!("Returning res form upstream {}", peer_addr);
-        }
+        tracing::trace!("Returning res form upstream {}", peer_addr);
+
         Ok(resp)
     }
 }

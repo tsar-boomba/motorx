@@ -51,6 +51,9 @@ s2n-quic-core = { optional = true, git = "https://github.com/aws/s2n-quic.git", 
 s2n-quic = { optional = true, git = "https://github.com/aws/s2n-quic.git", rev = "65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a", default-features = false, features = ["provider-address-token-default", "provider-tls-rustls"] }
 s2n-quic-h3 = { optional = true, git = "https://github.com/aws/s2n-quic.git", rev = "65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a", features = ["tracing"] }
 
+# prometheus feature
+prometheus-client = { optional = true, version = "0.23.1" }
+
 [dev-dependencies]
 reqwest = { version = "0.12.12", features = ["rustls-tls", "http3"] } # to send request to proxy in tests
 tokio = { workspace = true, features = ["full"] }
@@ -60,12 +63,12 @@ tempfile = "3.15.0"
 maplit = "1.0.2"
 
 [features]
-full = ["logging", "serde-config", "tls", "h3"]
-
-logging = []
+full = ["serde-config", "tls", "h3", "prometheus"]
 
 serde-config = ["serde", "serde_json", "http-serde"]
 
 tls = ["rustls", "rustls-native-certs", "rustls-pemfile", "tokio-rustls", "webpki-roots", "futures-util", "rustls-acme", "tokio-stream"]
 
 h3 = ["tls", "s2n-quic-core", "s2n-quic", "s2n-quic-h3"]
+
+prometheus = ["dep:prometheus-client"]

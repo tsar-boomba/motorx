@@ -7,7 +7,6 @@ use hyper::client;
 use hyper_util::rt::TokioIo;
 
 use crate::{
-    cfg_logging,
     config::{authentication::AuthenticationSource, Upstream},
     conn_pool::SendRequest,
     tcp_connect, UpstreamAndConnPool, Upstreams,
@@ -148,16 +147,14 @@ pub(crate) async fn proxy_request(
     tracing::trace!("Proxying request: {:?}", req);
 
     if let Err(e) = send_req.ready().await {
-        cfg_logging! {
-            println!("Upstream connection unexpectedly closed: {e:?}");
-        }
+        tracing::error!("Upstream connection unexpectedly closed: {e:?}");
         return bad_gateway();
     }
 
     let resp = match send_req.send_request(req).await {
         Ok(resp) => resp,
         Err(err) => {
-            cfg_logging! {error!("Failed to proxy request to {}: {err:?}", upstream.addr);};
+            tracing::error!("Failed to proxy request to {}: {err:?}", upstream.addr);
             return bad_gateway();
         }
     };
@@ -194,7 +191,7 @@ pub(crate) async fn authenticate<B>(
         return Ok(None);
     }
 
-    cfg_logging! {debug!("Authorizing request.");}
+    tracing::debug!("Authorizing request.");
 
     let auth_uri = match &authentication.source {
         AuthenticationSource::Path(path) => path,
@@ -227,7 +224,7 @@ pub(crate) async fn authenticate<B>(
     };
 
     // TODO: Refactor to use auth upstream's conn pool
-    cfg_logging! {info!("Opened new connection to: {}", upstream.0.addr);}
+    tracing::info!("Opened new connection to: {}", upstream.0.addr);
     let stream = tcp_connect(auth_upstream.0.addr.authority().unwrap().as_str()).await?;
     let (mut sender, conn) = client::conn::http1::Builder::new()
         .preserve_header_case(true)
@@ -237,7 +234,7 @@ pub(crate) async fn authenticate<B>(
 
     tokio::task::spawn(async move {
         if let Err(err) = conn.await {
-            cfg_logging! {error!("Connection failed: {:?}", err);}
+            tracing::error!("Connection failed: {:?}", err);
         }
     });
 

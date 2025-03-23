@@ -274,9 +274,7 @@ impl SendRequest {
                 *req.version_mut() = Version::HTTP_11;
                 send_request.send_request(req).await
             }
-            SendRequest::Http2(send_request) => {
-                send_request.send_request(req).await
-            }
+            SendRequest::Http2(send_request) => send_request.send_request(req).await,
         }
     }
 

@@ -14,23 +14,20 @@
 //! }
 //! ```
 
+mod cache;
 pub mod config;
 mod conn_pool;
-pub mod error;
-mod handle;
-#[macro_use]
-pub mod log;
-mod cache;
 #[cfg(test)]
 mod e2e;
+pub mod error;
 #[cfg(feature = "h3")]
 mod h3;
+mod handle;
 mod listener;
+#[cfg(feature = "prometheus")]
+mod prometheus;
 #[cfg(feature = "tls")]
 pub mod tls;
-
-#[macro_use(info, error, debug, trace)]
-extern crate tracing;
 
 use std::future::Future;
 use std::net::SocketAddr;
@@ -53,6 +50,7 @@ use listener::Listener;
 #[cfg(feature = "tls")]
 use tls::stream::TlsStream;
 use tokio::io::{AsyncRead, AsyncWrite, BufReader};
+use tokio::net::TcpListener;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 pub use config::{CacheSettings, Config, Rule};
@@ -80,6 +78,8 @@ pub struct Server {
     config: Arc<Config>,
     cache: Arc<Cache>,
     upstreams: Arc<Upstreams>,
+    #[cfg(feature = "prometheus")]
+    stats_collector: prometheus::StatsCollector,
     listener: Mutex<Option<Listener>>,
     #[cfg(feature = "h3")]
     h3_listener: Mutex<Option<h3::Listener>>,
@@ -113,19 +113,19 @@ impl Server {
             }
         });
 
-        cfg_logging! {debug!("Starting with config: {:#?}", *config);}
+        tracing::debug!("Starting with config: {:#?}", *config);
 
-        cfg_logging! {
-            info!("Motorx proxy listening on http://{}", {
-                listener.local_addr().unwrap()
-            });
-        }
+        tracing::info!("Motorx proxy listening on http://{}", {
+            listener.local_addr().unwrap()
+        });
 
         Ok(Self {
             semaphore: Arc::new(Semaphore::new(config.max_connections)),
             cache,
             upstreams,
             config,
+            #[cfg(feature = "prometheus")]
+            stats_collector: prometheus::StatsCollector::new(),
             listener: Mutex::new(Some(listener)),
             #[cfg(feature = "h3")]
             h3_listener,
@@ -152,6 +152,8 @@ impl Server {
     pub async fn run(self) -> Result<(), crate::Error> {
         let tcp_task = tokio::spawn(self.run_tcp());
         let h3_task = tokio::spawn(self.run_h3());
+        #[cfg(feature = "prometheus")]
+        self.start_prometheus().await;
 
         let (tcp_task_res, h3_task_res) = join(
             async move {
@@ -200,6 +202,8 @@ impl Server {
         let config = self.config.clone();
         let upstreams = self.upstreams.clone();
         let cache = self.cache.clone();
+        #[cfg(feature = "prometheus")]
+        let stats_collector = self.stats_collector.clone();
 
         async move {
             loop {
@@ -209,6 +213,8 @@ impl Server {
                         Ok((stream, peer_addr)) => {
                             tracing::trace!("Accepted connection from {}", peer_addr);
                             let domain = stream.domain();
+                            #[cfg(feature = "prometheus")]
+                            stats_collector.add_tcp_conn();
 
                             handle_connection(
                                 BufReader::with_capacity(config.client_buffer_size, stream),
@@ -218,12 +224,12 @@ impl Server {
                                 cache.clone(),
                                 upstreams.clone(),
                                 permit,
+                                #[cfg(feature = "prometheus")]
+                                stats_collector.clone(),
                             );
                         }
                         Err(e) => {
-                            cfg_logging! {
-                                error!("Error accepting, {:?}", e);
-                            }
+                            tracing::error!("Error accepting, {:?}", e);
                         }
                     }
                 }
@@ -243,6 +249,8 @@ impl Server {
         let config = self.config.clone();
         let upstreams = self.upstreams.clone();
         let cache = self.cache.clone();
+        #[cfg(feature = "prometheus")]
+        let stats_collector = self.stats_collector.clone();
 
         async move {
             let Some(mut h3_listener) = h3_listener.take() else {
@@ -267,6 +275,11 @@ impl Server {
                     let config = config.clone();
                     let cache = cache.clone();
                     let upstreams = upstreams.clone();
+                    #[cfg(feature = "prometheus")]
+                    let stats_collector = stats_collector.clone();
+
+                    #[cfg(feature = "prometheus")]
+                    stats_collector.add_quic_conn();
 
                     tokio::spawn(async move {
                         loop {
@@ -282,6 +295,11 @@ impl Server {
                             let config = config.clone();
                             let cache = cache.clone();
                             let upstreams = upstreams.clone();
+                            #[cfg(feature = "prometheus")]
+                            let stats_collector = stats_collector.clone();
+
+                            #[cfg(feature = "prometheus")]
+                            stats_collector.add_req(&req);
 
                             tokio::spawn(async move {
                                 let res = match handle_req(
@@ -300,6 +318,9 @@ impl Server {
                                         return Ok::<_, crate::Error>(());
                                     }
                                 };
+
+                                #[cfg(feature = "prometheus")]
+                                stats_collector.add_res(&res);
 
                                 let (head, body) = res.into_parts();
                                 send_res
@@ -321,6 +342,81 @@ impl Server {
             }
         }
     }
+
+    #[cfg(feature = "prometheus")]
+    async fn start_prometheus(&self) {
+        use bytes::{Bytes, BytesMut};
+        use http::header::CONTENT_TYPE;
+        use http_body_util::{combinators::BoxBody, Empty, Full};
+
+        let Some(listen_addr) = self.config.prometheus_addr else {
+            return;
+        };
+        let listener = TcpListener::bind(listen_addr).await.unwrap();
+        tracing::info!("Serving prometheus on {listen_addr}");
+        let stats_collector = self.stats_collector.clone();
+
+        tokio::spawn(async move {
+            loop {
+                match listener.accept().await {
+                    Ok((stream, peer_addr)) => {
+                        let stats_collector = stats_collector.clone();
+                        let service = service_fn({
+                            move |_: Request<Incoming>| {
+                                let stats_collector = stats_collector.clone();
+                                async move {
+                                    let mut body = BytesMut::new();
+                                    if let Err(err) = stats_collector.encode(&mut body) {
+                                        tracing::error!(
+                                            "[prometheus] Failed to encode registry: {err:?}"
+                                        );
+                                        return Ok(Response::builder()
+                                            .status(500)
+                                            .body(
+                                                Empty::new()
+                                                    .map_err(|never| match never {})
+                                                    .boxed(),
+                                            )
+                                            .unwrap());
+                                    }
+
+                                    Ok::<Response<BoxBody<Bytes, Error>>, Error>(
+                                        Response::builder()
+                                        .header(CONTENT_TYPE, "application/openmetrics-text; version=1.0.0; charset=utf-8")
+                                            .body(
+                                                Full::new(body.freeze())
+                                                    .map_err(|never| match never {})
+                                                    .boxed(),
+                                            )
+                                            .unwrap(),
+                                    )
+                                }
+                            }
+                        });
+
+                        tokio::spawn(async move {
+                            tracing::trace!("[prometheus] Handling connection from {}", peer_addr);
+                            let mut conn_build =
+                                hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
+                            conn_build.http1().timer(TokioTimer::new());
+                            conn_build.http2().timer(TokioTimer::new());
+                            if let Err(err) = conn_build
+                                .serve_connection_with_upgrades(TokioIo::new(stream), service)
+                                .await
+                            {
+                                tracing::trace!("[prometheus] Error handling connection: {err:?}");
+                            };
+
+                            tracing::trace!("[prometheus] Closing connection to {}", peer_addr);
+                        });
+                    }
+                    Err(err) => {
+                        tracing::error!("[prometheus] error accepting tcp conn: {err:?}")
+                    }
+                }
+            }
+        });
+    }
 }
 
 #[tracing::instrument(skip(stream, config, cache, conn_pools, permit))]
@@ -332,6 +428,7 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     cache: Arc<Cache>,
     conn_pools: Arc<Upstreams>,
     permit: OwnedSemaphorePermit,
+    #[cfg(feature = "prometheus")] stats_collector: prometheus::StatsCollector,
 ) {
     let h3_port = config.h3_addr.map(|s| s.port());
     let service = service_fn({
@@ -340,6 +437,11 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
             let config = config.clone();
             let cache = cache.clone();
             let conn_pools = conn_pools.clone();
+            #[cfg(feature = "prometheus")]
+            let stats_collector = stats_collector.clone();
+
+            #[cfg(feature = "prometheus")]
+            stats_collector.add_req(&req);
 
             async move {
                 let mut res = handle::handle_req(
@@ -352,9 +454,10 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 )
                 .await;
 
-                cfg_logging! {
-                    trace!("Responded to req from {}", peer_addr);
-                }
+                #[cfg(feature = "prometheus")]
+                let _ = res.as_ref().inspect(|res| stats_collector.add_res(res));
+
+                tracing::trace!("Responded to req from {}", peer_addr);
 
                 #[cfg(feature = "h3")]
                 {
@@ -381,9 +484,7 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     });
 
     tokio::spawn(async move {
-        cfg_logging! {
-            trace!("Handling connection from {}", peer_addr);
-        }
+        tracing::trace!("Handling connection from {}", peer_addr);
         let mut conn_build = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
         conn_build.http1().timer(TokioTimer::new());
         conn_build.http2().timer(TokioTimer::new());
@@ -391,12 +492,10 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
             .serve_connection_with_upgrades(TokioIo::new(stream), service)
             .await
         {
-            cfg_logging! {trace!("Error handling connection: {err:?}");}
+            tracing::trace!("Error handling connection: {err:?}");
         };
 
-        cfg_logging! {
-            trace!("Closing connection to {}", peer_addr);
-        }
+        tracing::trace!("Closing connection to {}", peer_addr);
 
         drop(permit);
     });
