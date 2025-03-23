@@ -15,10 +15,10 @@ use self::authentication::Authentication;
 pub struct Config {
     pub addr: SocketAddr,
     #[cfg(feature = "h3")]
-    #[cfg_attr(feature = "serde-config", serde(default))]
+    #[cfg_attr(all(feature = "h3", feature = "serde-config"), serde(default))]
     pub h3_addr: Option<SocketAddr>,
     #[cfg(feature = "prometheus")]
-    #[cfg_attr(feature = "prometheus", serde(default))]
+    #[cfg_attr(all(feature = "prometheus", feature = "serde-config"), serde(default))]
     pub prometheus_addr: Option<SocketAddr>,
     pub tls: Option<Tls>,
     pub rules: Vec<Rule>,
