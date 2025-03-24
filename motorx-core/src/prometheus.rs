@@ -22,20 +22,26 @@ pub struct StatsCollector {
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct ReqLabels {
     method: Method,
-    path: String,
+    path: SharedStr,
     version: Version,
+	host: Option<SharedStr>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct ResLabels {
     status: StatusCode,
     version: Version,
+	path: SharedStr,
+	host: Option<SharedStr>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct ConnLabels {
     conn_type: ConnType,
 }
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+struct SharedStr(Arc<str>);
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
 struct Method(http::Method);
@@ -86,22 +92,25 @@ impl StatsCollector {
         }
     }
 
-    pub fn add_req<B>(&self, req: &Request<B>) {
+    pub fn add_req<B>(&self, req: &Request<B>, path: Arc<str>, host: Option<Arc<str>>) {
         // TODO: consider interning path especially
         self.requests
             .get_or_create(&ReqLabels {
                 method: Method(req.method().clone()),
-                path: req.uri().path().into(),
+                path: SharedStr(path),
                 version: Version(req.version()),
+				host: host.map(SharedStr)
             })
             .inc();
     }
 
-    pub fn add_res<B>(&self, res: &Response<B>) {
+    pub fn add_res<B>(&self, res: &Response<B>, path: Arc<str>, host: Option<Arc<str>>) {
         self.responses
             .get_or_create(&ResLabels {
                 status: StatusCode(res.status()),
                 version: Version(res.version()),
+				path: SharedStr(path),
+				host: host.map(SharedStr)
             })
             .inc();
     }
@@ -126,6 +135,12 @@ impl StatsCollector {
         let res = encode(to, &self.registry);
 		res
     }
+}
+
+impl EncodeLabelValue for SharedStr {
+	fn encode(&self, encoder: &mut prometheus_client::encoding::LabelValueEncoder) -> Result<(), std::fmt::Error> {
+		encoder.write_str(&self.0)
+	}
 }
 
 impl EncodeLabelValue for Method {

@@ -39,7 +39,7 @@ use conn_pool::Pool;
 use futures_util::future::join;
 use futures_util::TryStreamExt;
 use handle::handle_req;
-use http::header::ALT_SVC;
+use http::header::{ALT_SVC, HOST};
 use http::{HeaderValue, Response};
 use http_body_util::BodyExt;
 use hyper::body::Incoming;
@@ -299,7 +299,11 @@ impl Server {
                             let stats_collector = stats_collector.clone();
 
                             #[cfg(feature = "prometheus")]
-                            stats_collector.add_req(&req);
+                            let path = Arc::<str>::from(req.uri().path());
+                            #[cfg(feature = "prometheus")]
+                            let host = extract_host(&req).map(|s| Arc::<str>::from(s));
+                            #[cfg(feature = "prometheus")]
+                            stats_collector.add_req(&req, path.clone(), host.clone());
 
                             tokio::spawn(async move {
                                 let res = match handle_req(
@@ -320,7 +324,7 @@ impl Server {
                                 };
 
                                 #[cfg(feature = "prometheus")]
-                                stats_collector.add_res(&res);
+                                stats_collector.add_res(&res, path, host);
 
                                 let (head, body) = res.into_parts();
                                 send_res
@@ -441,7 +445,11 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
             let stats_collector = stats_collector.clone();
 
             #[cfg(feature = "prometheus")]
-            stats_collector.add_req(&req);
+            let path = Arc::<str>::from(req.uri().path());
+            #[cfg(feature = "prometheus")]
+            let host = extract_host(&req).map(|s| Arc::<str>::from(s));
+            #[cfg(feature = "prometheus")]
+            stats_collector.add_req(&req, path.clone(), host.clone());
 
             async move {
                 let mut res = handle::handle_req(
@@ -455,7 +463,9 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
                 .await;
 
                 #[cfg(feature = "prometheus")]
-                let _ = res.as_ref().inspect(|res| stats_collector.add_res(res));
+                let _ = res
+                    .as_ref()
+                    .inspect(move |res| stats_collector.add_res(res, path, host));
 
                 tracing::trace!("Responded to req from {}", peer_addr);
 
@@ -513,6 +523,19 @@ async fn tcp_connect(
     addr: impl tokio::net::ToSocketAddrs,
 ) -> std::io::Result<tokio::net::TcpStream> {
     tokio::net::TcpStream::connect(addr).await
+}
+
+#[inline]
+fn extract_host<B>(req: &Request<B>) -> Option<&str> {
+    match req.uri().host() {
+        Some(host) => Some(host),
+        None => match req.headers().get(HOST) {
+            Some(host_header) => host_header.to_str().ok(),
+            None => {
+                return None;
+            }
+        },
+    }
 }
 
 fn init_upstreams(config: &mut Config) -> Upstreams {
