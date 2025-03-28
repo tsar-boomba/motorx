@@ -1,9 +1,10 @@
-use std::{io, net::SocketAddr, pin::Pin, sync::Arc};
+use std::{io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
 
 use futures_util::StreamExt;
 use tokio::{
     io::{AsyncRead, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    time::timeout,
 };
 
 use crate::{config::Tls, Config};
@@ -165,9 +166,17 @@ impl Listener {
                 } else {
                     tracing::trace!("Accepting TLS connection...");
                     let domain = start_handshake.client_hello().server_name().map(Arc::from);
-                    let tls = start_handshake.into_stream(server_config.clone()).await?;
+                    let Ok(tls_res) = timeout(
+                        Duration::from_secs(3),
+                        start_handshake.into_stream(server_config.clone()),
+                    )
+                    .await
+                    else {
+                        tracing::warn!("Timeout accepting ACME TLS conn");
+                        continue;
+                    };
 
-                    return Ok((Stream::AcmeTls(tls, domain), peer));
+                    return Ok((Stream::AcmeTls(tls_res?, domain), peer));
                 }
             },
         }
