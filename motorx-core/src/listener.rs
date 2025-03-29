@@ -150,15 +150,26 @@ impl Listener {
                 tracing::trace!("Accepting conenction with ACME...");
                 let (stream, peer) = listener.accept().await?;
 
-                let start_handshake =
-                    tokio_rustls::LazyConfigAcceptor::new(Default::default(), stream).await?;
+                let Ok(start_handshake) = timeout(
+                    Duration::from_secs(2),
+                    tokio_rustls::LazyConfigAcceptor::new(Default::default(), stream),
+                )
+                .await
+                else {
+                    tracing::warn!("Timeout receiving client hello from {peer}");
+                    continue;
+                };
+                let start_handshake = start_handshake?;
 
                 if rustls_acme::is_tls_alpn_challenge(&start_handshake.client_hello()) {
                     tracing::info!("received TLS-ALPN-01 validation request");
-                    let mut tls = start_handshake
-                        .into_stream(challenge_config.clone())
-                        .await?;
+                    let challenge_config = challenge_config.clone();
                     tokio::spawn(async move {
+                        let Ok(mut tls) = start_handshake.into_stream(challenge_config).await
+                        else {
+                            tracing::error!("Error in ACME challenge handshake");
+                            return;
+                        };
                         if let Err(err) = tls.shutdown().await {
                             tracing::error!("Error in ACME challenge conn: {err:?}")
                         };
@@ -167,12 +178,12 @@ impl Listener {
                     tracing::trace!("Accepting TLS connection...");
                     let domain = start_handshake.client_hello().server_name().map(Arc::from);
                     let Ok(tls_res) = timeout(
-                        Duration::from_secs(3),
+                        Duration::from_secs(2),
                         start_handshake.into_stream(server_config.clone()),
                     )
                     .await
                     else {
-                        tracing::warn!("Timeout accepting ACME TLS conn");
+                        tracing::warn!("Timeout accepting ACME TLS conn form {peer}");
                         continue;
                     };
 
