@@ -147,7 +147,7 @@ impl Listener {
                 server_config,
                 local_addr: _local_addr,
             } => loop {
-                tracing::trace!("Accepting conenction with ACME...");
+                tracing::trace!("Accepting connection with ACME...");
                 let (stream, peer) = listener.accept().await?;
 
                 let Ok(start_handshake) = timeout(
