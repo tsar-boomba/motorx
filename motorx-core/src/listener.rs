@@ -49,7 +49,7 @@ impl Listener {
 
                             rustls::crypto::aws_lc_rs::default_provider()
                                 .install_default()
-                                .unwrap();
+                                .ok();
 
                             // Do not use client certificate authentication.
                             let mut cfg = rustls::ServerConfig::builder()
@@ -198,7 +198,9 @@ impl Stream {
     pub fn domain(&self) -> Option<Arc<str>> {
         match self {
             Stream::Plain(_) => None,
+            #[cfg(feature = "tls")]
             Stream::FileTls(_) => None,
+            #[cfg(feature = "tls")]
             Stream::AcmeTls(_, domain) => domain.clone(),
         }
     }
@@ -282,7 +284,9 @@ impl AsyncWrite for Stream {
     fn is_write_vectored(&self) -> bool {
         match self {
             Stream::Plain(tcp_stream) => tcp_stream.is_write_vectored(),
+            #[cfg(feature = "tls")]
             Stream::FileTls(tls_stream) => tls_stream.is_write_vectored(),
+            #[cfg(feature = "tls")]
             Stream::AcmeTls(tls_stream, _) => tls_stream.is_write_vectored(),
         }
     }
@@ -294,7 +298,9 @@ impl AsyncWrite for Stream {
     ) -> std::task::Poll<Result<usize, io::Error>> {
         match self.get_mut() {
             Stream::Plain(tcp_stream) => Pin::new(tcp_stream).poll_write_vectored(cx, bufs),
+            #[cfg(feature = "tls")]
             Stream::FileTls(tls_stream) => Pin::new(tls_stream).poll_write_vectored(cx, bufs),
+            #[cfg(feature = "tls")]
             Stream::AcmeTls(tls_stream, _) => Pin::new(tls_stream).poll_write_vectored(cx, bufs),
         }
     }

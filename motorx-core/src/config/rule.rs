@@ -32,19 +32,22 @@ pub struct Rule {
 impl Rule {
     pub fn matches<B>(&self, req: &Request<B>) -> bool {
         let host = match req.uri().host() {
-            Some(host) => host.as_bytes(),
+            Some(host) => Some(host.as_bytes()),
             None => match req.headers().get(HOST) {
-                Some(host_header) => host_header.as_bytes(),
-                None => {
+                Some(host_header) => Some(host_header.as_bytes()),
+                None if self.host.is_some() => {
                     tracing::warn!("Request missing host");
                     return false;
-                }
+                },
+                None => None,
             },
         };
 
         if let Some(expected_host) = self.host.as_deref() {
-            if host != expected_host.as_bytes() {
-                return false;
+            if let Some(host) = host {
+                if host != expected_host.as_bytes() {
+                    return false;
+                }
             }
         }
 

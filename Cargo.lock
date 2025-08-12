@@ -762,9 +762,9 @@ dependencies = [
 
 [[package]]
 name = "h3"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5e7675a0963b47a6d12fe44c279918b4ffb19baee838ac37f48d2722ad5bc6ab"
+checksum = "7dfb059a4f28a66f186ed16ad912d142f490676acba59353831d7cb45a96b0d3"
 dependencies = [
  "bytes",
  "fastrand",
@@ -776,9 +776,9 @@ dependencies = [
 
 [[package]]
 name = "h3"
-version = "0.0.7"
+version = "0.0.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dfb059a4f28a66f186ed16ad912d142f490676acba59353831d7cb45a96b0d3"
+checksum = "10872b55cfb02a821b69dc7cf8dc6a71d6af25eb9a79662bec4a9d016056b3be"
 dependencies = [
  "bytes",
  "fastrand",
@@ -970,7 +970,7 @@ dependencies = [
  "http-body",
  "hyper",
  "pin-project-lite",
- "socket2",
+ "socket2 0.5.8",
  "tokio",
  "tower-service",
  "tracing",
@@ -1158,6 +1158,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "io-uring"
+version = "0.7.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d93587f37623a1a17d94ef2bc9ada592f5465fe7732084ab7beefabe5c77c0c4"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "libc",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1220,9 +1231,9 @@ checksum = "830d08ce1d1d941e6b30645f1a0eb5643013d835ce3779a5fc208261dbe10f55"
 
 [[package]]
 name = "libc"
-version = "0.2.171"
+version = "0.2.175"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c19937216e9d3aa9956d9bb8dfc0b0c8beb6058fc4f7a4dc4d850edf86a237d6"
+checksum = "6a82ae493e598baaea5209805c49bbf2ea7de956d50d7da0da1164f9c6d28543"
 
 [[package]]
 name = "libloading"
@@ -1646,7 +1657,7 @@ version = "0.2.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
- "zerocopy 0.8.24",
+ "zerocopy",
 ]
 
 [[package]]
@@ -1705,7 +1716,7 @@ dependencies = [
  "quinn-udp",
  "rustc-hash 2.1.1",
  "rustls",
- "socket2",
+ "socket2 0.5.8",
  "thiserror 2.0.12",
  "tokio",
  "tracing",
@@ -1741,7 +1752,7 @@ dependencies = [
  "cfg_aliases",
  "libc",
  "once_cell",
- "socket2",
+ "socket2 0.5.8",
  "tracing",
  "windows-sys 0.59.0",
 ]
@@ -1782,7 +1793,7 @@ checksum = "3779b94aeb87e8bd4e834cee3650289ee9e0d5677f976ecdb6d219e5f4f6cd94"
 dependencies = [
  "rand_chacha 0.9.0",
  "rand_core 0.9.3",
- "zerocopy 0.8.24",
+ "zerocopy",
 ]
 
 [[package]]
@@ -2119,18 +2130,18 @@ checksum = "28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f"
 
 [[package]]
 name = "s2n-codec"
-version = "0.54.0"
-source = "git+https://github.com/aws/s2n-quic.git?rev=65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a#65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a"
+version = "0.63.0"
+source = "git+https://github.com/aws/s2n-quic.git?rev=30b021edc294601ec759ef5c2801c7f38c518860#30b021edc294601ec759ef5c2801c7f38c518860"
 dependencies = [
  "byteorder",
  "bytes",
- "zerocopy 0.7.35",
+ "zerocopy",
 ]
 
 [[package]]
 name = "s2n-quic"
-version = "1.54.0"
-source = "git+https://github.com/aws/s2n-quic.git?rev=65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a#65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a"
+version = "1.63.0"
+source = "git+https://github.com/aws/s2n-quic.git?rev=30b021edc294601ec759ef5c2801c7f38c518860#30b021edc294601ec759ef5c2801c7f38c518860"
 dependencies = [
  "bytes",
  "cfg-if",
@@ -2147,14 +2158,14 @@ dependencies = [
  "s2n-quic-tls-default",
  "s2n-quic-transport",
  "tokio",
- "zerocopy 0.7.35",
+ "zerocopy",
  "zeroize",
 ]
 
 [[package]]
 name = "s2n-quic-core"
-version = "0.54.0"
-source = "git+https://github.com/aws/s2n-quic.git?rev=65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a#65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a"
+version = "0.63.0"
+source = "git+https://github.com/aws/s2n-quic.git?rev=30b021edc294601ec759ef5c2801c7f38c518860#30b021edc294601ec759ef5c2801c7f38c518860"
 dependencies = [
  "atomic-waker",
  "byteorder",
@@ -2169,13 +2180,13 @@ dependencies = [
  "s2n-codec",
  "subtle",
  "tracing",
- "zerocopy 0.7.35",
+ "zerocopy",
 ]
 
 [[package]]
 name = "s2n-quic-crypto"
-version = "0.54.0"
-source = "git+https://github.com/aws/s2n-quic.git?rev=65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a#65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a"
+version = "0.63.0"
+source = "git+https://github.com/aws/s2n-quic.git?rev=30b021edc294601ec759ef5c2801c7f38c518860#30b021edc294601ec759ef5c2801c7f38c518860"
 dependencies = [
  "aws-lc-rs",
  "cfg-if",
@@ -2188,33 +2199,33 @@ dependencies = [
 [[package]]
 name = "s2n-quic-h3"
 version = "0.1.0"
-source = "git+https://github.com/aws/s2n-quic.git?rev=65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a#65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a"
+source = "git+https://github.com/aws/s2n-quic.git?rev=30b021edc294601ec759ef5c2801c7f38c518860#30b021edc294601ec759ef5c2801c7f38c518860"
 dependencies = [
  "bytes",
  "futures",
- "h3 0.0.6",
+ "h3 0.0.8",
  "s2n-quic",
  "tracing",
 ]
 
 [[package]]
 name = "s2n-quic-platform"
-version = "0.54.0"
-source = "git+https://github.com/aws/s2n-quic.git?rev=65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a#65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a"
+version = "0.63.0"
+source = "git+https://github.com/aws/s2n-quic.git?rev=30b021edc294601ec759ef5c2801c7f38c518860#30b021edc294601ec759ef5c2801c7f38c518860"
 dependencies = [
  "cfg-if",
  "futures",
  "lazy_static",
  "libc",
  "s2n-quic-core",
- "socket2",
+ "socket2 0.6.0",
  "tokio",
 ]
 
 [[package]]
 name = "s2n-quic-rustls"
-version = "0.54.0"
-source = "git+https://github.com/aws/s2n-quic.git?rev=65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a#65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a"
+version = "0.63.0"
+source = "git+https://github.com/aws/s2n-quic.git?rev=30b021edc294601ec759ef5c2801c7f38c518860#30b021edc294601ec759ef5c2801c7f38c518860"
 dependencies = [
  "bytes",
  "rustls",
@@ -2226,8 +2237,8 @@ dependencies = [
 
 [[package]]
 name = "s2n-quic-tls"
-version = "0.54.0"
-source = "git+https://github.com/aws/s2n-quic.git?rev=65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a#65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a"
+version = "0.63.0"
+source = "git+https://github.com/aws/s2n-quic.git?rev=30b021edc294601ec759ef5c2801c7f38c518860#30b021edc294601ec759ef5c2801c7f38c518860"
 dependencies = [
  "bytes",
  "errno",
@@ -2240,8 +2251,8 @@ dependencies = [
 
 [[package]]
 name = "s2n-quic-tls-default"
-version = "0.54.0"
-source = "git+https://github.com/aws/s2n-quic.git?rev=65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a#65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a"
+version = "0.63.0"
+source = "git+https://github.com/aws/s2n-quic.git?rev=30b021edc294601ec759ef5c2801c7f38c518860#30b021edc294601ec759ef5c2801c7f38c518860"
 dependencies = [
  "s2n-quic-rustls",
  "s2n-quic-tls",
@@ -2249,8 +2260,8 @@ dependencies = [
 
 [[package]]
 name = "s2n-quic-transport"
-version = "0.54.0"
-source = "git+https://github.com/aws/s2n-quic.git?rev=65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a#65d6b6ea6fc68d845b98dc1ea5b7f96ad7bb9d0a"
+version = "0.63.0"
+source = "git+https://github.com/aws/s2n-quic.git?rev=30b021edc294601ec759ef5c2801c7f38c518860#30b021edc294601ec759ef5c2801c7f38c518860"
 dependencies = [
  "bytes",
  "futures-channel",
@@ -2266,9 +2277,9 @@ dependencies = [
 
 [[package]]
 name = "s2n-tls"
-version = "0.3.14"
+version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b22750792208bf02043d70f9bb020fdeb11108c6e55507bb73b5c05d8ddf11c"
+checksum = "902398e2a0bd7ed40ecc61ba85f5985139213b86bb6decb547120367733c9545"
 dependencies = [
  "errno",
  "hex",
@@ -2279,9 +2290,9 @@ dependencies = [
 
 [[package]]
 name = "s2n-tls-sys"
-version = "0.3.14"
+version = "0.3.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4f693651d9fc02b746dd1dd7edabb946cacb5bcf74020ec855c3fd97f26cfeef"
+checksum = "c17994d4b67dcca7c7c01120ad30a639c1500c589d695478490e7ad6584683fd"
 dependencies = [
  "aws-lc-rs",
  "cc",
@@ -2436,6 +2447,16 @@ checksum = "c970269d99b64e60ec3bd6ad27270092a5394c4e309314b18ae3fe575695fbe8"
 dependencies = [
  "libc",
  "windows-sys 0.52.0",
+]
+
+[[package]]
+name = "socket2"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "233504af464074f9d066d7b5416c5f9b894a5862a6506e306f7b816cdd6f1807"
+dependencies = [
+ "libc",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2623,20 +2644,22 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.44.1"
+version = "1.47.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f382da615b842244d4b8738c82ed1275e6c5dd90c459a30941cd07080b06c91a"
+checksum = "89e49afdadebb872d3145a5638b59eb0691ea23e46ca484037cfab3b76b95038"
 dependencies = [
  "backtrace",
  "bytes",
+ "io-uring",
  "libc",
  "mio",
  "parking_lot",
  "pin-project-lite",
  "signal-hook-registry",
- "socket2",
+ "slab",
+ "socket2 0.6.0",
  "tokio-macros",
- "windows-sys 0.52.0",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3270,32 +3293,11 @@ dependencies = [
 
 [[package]]
 name = "zerocopy"
-version = "0.7.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b9b4fd18abc82b8136838da5d50bae7bdea537c574d8dc1a34ed098d6c166f0"
-dependencies = [
- "byteorder",
- "zerocopy-derive 0.7.35",
-]
-
-[[package]]
-name = "zerocopy"
 version = "0.8.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2586fea28e186957ef732a5f8b3be2da217d65c5969d4b1e17f973ebbe876879"
 dependencies = [
- "zerocopy-derive 0.8.24",
-]
-
-[[package]]
-name = "zerocopy-derive"
-version = "0.7.35"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa4f8080344d4671fb4e831a13ad1e68092748387dfc4f55e356242fae12ce3e"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn",
+ "zerocopy-derive",
 ]
 
 [[package]]

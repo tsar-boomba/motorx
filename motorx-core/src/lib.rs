@@ -141,6 +141,7 @@ impl Server {
             .local_addr()
     }
 
+    #[cfg(feature = "h3")]
     pub fn h3_local_addr(&self) -> Option<std::io::Result<SocketAddr>> {
         self.h3_listener
             .lock()
@@ -432,9 +433,12 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     cache: Arc<Cache>,
     conn_pools: Arc<Upstreams>,
     permit: OwnedSemaphorePermit,
-    #[cfg(feature = "prometheus")] stats_collector: prometheus::StatsCollector,
+    #[cfg(feature = "prometheus")]
+    stats_collector: prometheus::StatsCollector,
 ) {
+    #[cfg(feature = "h3")]
     let h3_port = config.h3_addr.map(|s| s.port());
+
     let service = service_fn({
         move |req: Request<Incoming>| {
             let domain = domain.clone();

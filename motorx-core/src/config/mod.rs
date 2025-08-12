@@ -118,8 +118,20 @@ impl Default for Config {
 }
 
 impl Config {
+    #[cfg(feature = "h3")]
     pub(crate) fn will_start_h3(&self) -> bool {
-        self.h3_addr.is_some() && matches!(self.tls, Some(Tls::Acme { .. } | Tls::File { .. }))
+        self.h3_addr.is_some() && self.tls_enabled()
+    }
+
+    pub(crate) fn tls_enabled(&self) -> bool {
+        #[cfg(feature = "tls")]
+        {
+            matches!(self.tls, Some(Tls::Acme { .. } | Tls::File { .. }))
+        }
+        #[cfg(not(feature = "tls"))]
+        {
+            false
+        }
     }
 }
 

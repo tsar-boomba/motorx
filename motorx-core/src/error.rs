@@ -19,6 +19,10 @@ pub enum Error {
     Rustls(#[from] rustls::Error),
 
     #[cfg(feature = "h3")]
-    #[error("h3 error: {0:?}")]
-    H3(#[from] s2n_quic_h3::h3::Error),
+    #[error("h3 connection error: {0:?}")]
+    H3ConnectionError(#[from] s2n_quic_h3::h3::error::ConnectionError),
+
+    #[cfg(feature = "h3")]
+    #[error("h3 stream error: {0:?}")]
+    H3StreamError(#[from] s2n_quic_h3::h3::error::StreamError),
 }

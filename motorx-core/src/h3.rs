@@ -104,7 +104,8 @@ impl H3Connection {
         crate::Error,
     > {
         match self.conn.accept().await? {
-            Some((req, stream)) => {
+            Some(resolver) => {
+                let (req, stream) = resolver.resolve_request().await?;
                 let (head, _) = req.into_parts();
                 let (send, recv) = stream.split();
                 let body = H3Body { stream: recv };
