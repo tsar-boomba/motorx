@@ -6,7 +6,7 @@ use h3::server::RequestStream;
 use http::Request;
 use http_body::Frame;
 use http_body_util::{combinators::BoxBody, BodyExt};
-use rustls::{crypto::CryptoProvider, ServerConfig};
+use rustls::ServerConfig;
 use s2n_quic_h3::{h3, RecvStream, SendStream};
 
 use crate::Config;
@@ -26,16 +26,18 @@ pub struct H3Connection {
 
 pub struct H3Body {
     stream: RequestStream<RecvStream, Bytes>,
+    state: BodyState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BodyState {
+    Data,
+    Trailers,
 }
 
 impl Listener {
     pub fn new(config: Arc<Config>, base_server_config: &ServerConfig) -> Self {
-        #[allow(deprecated)]
-        let cipher_suites = s2n_quic::provider::tls::rustls::DEFAULT_CIPHERSUITES;
-        let default_crypto_provider = CryptoProvider {
-            cipher_suites: cipher_suites.to_vec(),
-            ..rustls::crypto::aws_lc_rs::default_provider()
-        };
+        let default_crypto_provider = rustls::crypto::aws_lc_rs::default_provider();
 
         let mut cfg =
             rustls::ServerConfig::builder_with_provider(Arc::new(default_crypto_provider))
@@ -46,7 +48,7 @@ impl Listener {
 
         cfg.ignore_client_order = true;
         cfg.max_fragment_size = None;
-        cfg.alpn_protocols = vec![b"h3".to_vec()];
+        cfg.alpn_protocols = vec![b"h3".to_vec(), b"h3-29".to_vec(), b"h3-32".to_vec()];
 
         let server = s2n_quic::Server::builder()
             .with_tls(s2n_quic::provider::tls::rustls::Server::from(cfg))
@@ -108,7 +110,10 @@ impl H3Connection {
                 let (req, stream) = resolver.resolve_request().await?;
                 let (head, _) = req.into_parts();
                 let (send, recv) = stream.split();
-                let body = H3Body { stream: recv };
+                let body = H3Body {
+                    stream: recv,
+                    state: BodyState::Data,
+                };
 
                 Ok(Some((Request::from_parts(head, body.boxed()), send)))
             }
@@ -126,16 +131,37 @@ impl http_body::Body for H3Body {
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Result<http_body::Frame<Self::Data>, Self::Error>>> {
-        match ready!(self.stream.poll_recv_data(cx)) {
-            Ok(recv_result) => match recv_result {
-                Some(mut data) => {
-                    // Copying is fine since we know s2n_quic_h3 uses Bytes under the hood
-                    // so the copy is actually just a ref-count increment
-                    Poll::Ready(Some(Ok(Frame::data(data.copy_to_bytes(data.remaining())))))
-                }
-                None => Poll::Ready(None),
-            },
-            Err(err) => Poll::Ready(Some(Err(err.into()))),
+        if self.state == BodyState::Data {
+            match ready!(self.stream.poll_recv_data(cx)) {
+                Ok(recv_result) => match recv_result {
+                    Some(mut data) => {
+                        // Copying is fine since we know s2n_quic_h3 uses Bytes under the hood
+                        // so the copy is actually just a ref-count increment
+                        return Poll::Ready(Some(Ok(Frame::data(
+                            data.copy_to_bytes(data.remaining()),
+                        ))));
+                    }
+                    None => {
+                        self.state = BodyState::Trailers;
+                    }
+                },
+                Err(err) => return Poll::Ready(Some(Err(err.into()))),
+            }
         }
+
+        // Must now be ready for Trailers
+        if self.state == BodyState::Trailers {
+            match ready!(self.stream.poll_recv_trailers(cx)) {
+                Ok(trailers) => match trailers {
+                    Some(trailers) => {
+                        return Poll::Ready(Some(Ok(Frame::trailers(trailers))));
+                    }
+                    None => {}
+                },
+                Err(err) => return Poll::Ready(Some(Err(err.into()))),
+            }
+        }
+
+        Poll::Ready(None)
     }
 }
