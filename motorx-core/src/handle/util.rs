@@ -121,16 +121,16 @@ pub(crate) async fn clone_response<T: BodyExt>(
     res: Response<T>,
 ) -> Result<(Response<BoxBody<Bytes, crate::Error>>, Response<Bytes>), T::Error> {
     let (parts, og_body) = res.into_parts();
-    let body = read_body::<_, crate::Error>(og_body).await?;
+    let body = read_body::<_>(og_body).await?;
 
-    return Ok((
+    Ok((
         Response::from_parts(parts.clone(), full(body.clone())),
         Response::from_parts(parts, body),
-    ));
+    ))
 }
 
 #[inline]
-pub(crate) async fn read_body<B: BodyExt, E>(body: B) -> Result<Bytes, B::Error> {
+pub(crate) async fn read_body<B: BodyExt>(body: B) -> Result<Bytes, B::Error> {
     Ok(body.collect().await?.to_bytes())
 }
 
@@ -141,7 +141,7 @@ pub(crate) async fn proxy_request(
     peer_addr: SocketAddr,
     upgrading: bool,
 ) -> Response<BoxBody<Bytes, crate::Error>> {
-    add_proxy_headers(&mut req, &upstream, peer_addr);
+    add_proxy_headers(&mut req, upstream, peer_addr);
     remove_hop_headers(&mut req, upgrading);
 
     tracing::trace!("Proxying request: {:?}", req);
@@ -215,7 +215,7 @@ pub(crate) async fn authenticate<B>(
     remove_hop_headers(&mut auth_req, false);
 
     let auth_upstream = match &authentication.source {
-        AuthenticationSource::Path(_) => &upstream,
+        AuthenticationSource::Path(_) => upstream,
         AuthenticationSource::Upstream {
             key,
             name: _,

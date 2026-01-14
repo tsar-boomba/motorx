@@ -54,8 +54,8 @@ struct StatusCode(http::StatusCode);
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelValue)]
 enum ConnType {
-    TCP,
-    QUIC,
+    Tcp,
+    Quic,
 }
 
 impl StatsCollector {
@@ -118,7 +118,7 @@ impl StatsCollector {
     pub fn add_quic_conn(&self) {
         self.connections
             .get_or_create(&ConnLabels {
-                conn_type: ConnType::QUIC,
+                conn_type: ConnType::Quic,
             })
             .inc();
     }
@@ -126,14 +126,13 @@ impl StatsCollector {
     pub fn add_tcp_conn(&self) {
         self.connections
             .get_or_create(&ConnLabels {
-                conn_type: ConnType::TCP,
+                conn_type: ConnType::Tcp,
             })
             .inc();
     }
 
     pub fn encode(&self, to: &mut BytesMut) -> Result<(), std::fmt::Error> {
-        let res = encode(to, &self.registry);
-		res
+		encode(to, &self.registry)
     }
 }
 

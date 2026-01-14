@@ -82,7 +82,7 @@ async fn handle_match(
     new_parts.authority = req.uri().authority().cloned();
     new_parts.path_and_query = Some(
         PathAndQuery::from_str(
-            &*rule.remove_match(
+            &rule.remove_match(
                 req.uri()
                     .path_and_query()
                     .map(|pq| pq.as_str())
@@ -102,7 +102,7 @@ async fn handle_match(
     let upgrade_header = req.headers().get(UPGRADE);
     let upgrading = connection_header.is_some_and(|v| {
         v.to_str()
-            .is_ok_and(|v| v.to_ascii_lowercase() == "upgrade")
+            .is_ok_and(|v| v.eq_ignore_ascii_case("upgrade"))
     }) && upgrade_header.is_some_and(|v| !v.is_empty());
 
     if upgrading {
@@ -141,7 +141,7 @@ async fn handle_match(
                     // dont hold lock while waiting for inflight
                     if let Ok(Some(res)) = inflight.subscribe().recv().await {
                         // Clone the inner response and use it
-                        return Ok((*res).clone().0.map(|b| util::full(b)));
+                        return Ok((*res).clone().0.map(util::full));
                     } else {
                         // inflight request failed, proceed as if caching was disabled
                         None

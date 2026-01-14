@@ -1,7 +1,7 @@
 use std::{fs, io, path::Path};
 
 use itertools::Itertools;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 
 pub mod stream;
 
@@ -19,11 +19,11 @@ pub(crate) fn load_certs(filename: impl AsRef<Path>) -> io::Result<Vec<Certifica
     let mut reader = io::BufReader::new(certfile);
 
     // Load and return certificate.
-    let certs = rustls_pemfile::certs(&mut reader)
+    let certs = rustls::pki_types::CertificateDer::pem_reader_iter(&mut reader)
         .try_collect::<_, Vec<_>, _>()
         .map_err(|e| error(e.to_string()))?;
 
-    if certs.len() < 1 {
+    if certs.is_empty() {
         return Err(error("Cannot have empty certs.".into()));
     }
 
@@ -45,12 +45,12 @@ pub(crate) fn load_private_key(filename: impl AsRef<Path>) -> io::Result<Private
 
     // TODO: migrate to rustls-pki-types
     // Load and return a single private key.
-    let key = rustls_pemfile::private_key(&mut reader)?
-        .ok_or_else(|| error("Missing private key".into()))?;
+    let key = rustls::pki_types::PrivateKeyDer::from_pem_reader(&mut reader)
+        .map_err(|_| error("Missing private key".into()))?;
 
     Ok(key)
 }
 
 fn error(err: String) -> io::Error {
-    io::Error::new(io::ErrorKind::Other, err)
+    io::Error::other(err)
 }

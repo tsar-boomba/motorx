@@ -69,14 +69,14 @@ impl Listener {
         let conn = self.server.accept().await.unwrap();
         let peer_addr = conn
             .remote_addr()
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "missing remote addr"))?;
+            .map_err(|_| io::Error::other("missing remote addr"))?;
         tracing::trace!("QUIC connection accepted from {peer_addr}");
 
         Ok(H3Connection {
             peer_addr,
             server_name: conn
                 .server_name()
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "missing remote addr"))?
+                .map_err(|_| io::Error::other("missing remote addr"))?
                 .as_deref()
                 .map(Arc::from),
             conn: h3::server::builder()
@@ -152,11 +152,8 @@ impl http_body::Body for H3Body {
         // Must now be ready for Trailers
         if self.state == BodyState::Trailers {
             match ready!(self.stream.poll_recv_trailers(cx)) {
-                Ok(trailers) => match trailers {
-                    Some(trailers) => {
-                        return Poll::Ready(Some(Ok(Frame::trailers(trailers))));
-                    }
-                    None => {}
+                Ok(trailers) => if let Some(trailers) = trailers {
+                    return Poll::Ready(Some(Ok(Frame::trailers(trailers))));
                 },
                 Err(err) => return Poll::Ready(Some(Err(err.into()))),
             }

@@ -74,7 +74,7 @@ impl Listener {
                             .directory_lets_encrypt(prod)
                             .state();
                         let challenge_config = state.challenge_rustls_config();
-                        let mut server_config = (&*state.default_rustls_config()).clone();
+                        let mut server_config = (*state.default_rustls_config()).clone();
                         server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
                         tokio::spawn(async move {

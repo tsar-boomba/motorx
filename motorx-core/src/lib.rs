@@ -98,7 +98,7 @@ impl Server {
 
         #[cfg(feature = "h3")]
         let h3_listener = Mutex::new({
-            if let Some(_) = config.h3_addr {
+            if config.h3_addr.is_some() {
                 // Only start h3 if the address is set and TLS is enabled
 
                 if let Some(server_config) = listener.server_config() {
@@ -302,7 +302,7 @@ impl Server {
                             #[cfg(feature = "prometheus")]
                             let path = Arc::<str>::from(req.uri().path());
                             #[cfg(feature = "prometheus")]
-                            let host = extract_host(&req).map(|s| Arc::<str>::from(s));
+                            let host = extract_host(&req).map(Arc::<str>::from);
                             #[cfg(feature = "prometheus")]
                             stats_collector.add_req(&req, path.clone(), host.clone());
 
@@ -451,7 +451,7 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
             #[cfg(feature = "prometheus")]
             let path = Arc::<str>::from(req.uri().path());
             #[cfg(feature = "prometheus")]
-            let host = extract_host(&req).map(|s| Arc::<str>::from(s));
+            let host = extract_host(&req).map(Arc::<str>::from);
             #[cfg(feature = "prometheus")]
             stats_collector.add_req(&req, path.clone(), host.clone());
 
@@ -536,7 +536,7 @@ fn extract_host<B>(req: &Request<B>) -> Option<&str> {
         None => match req.headers().get(HOST) {
             Some(host_header) => host_header.to_str().ok(),
             None => {
-                return None;
+                None
             }
         },
     }
@@ -553,7 +553,7 @@ fn init_upstreams(config: &mut Config) -> Upstreams {
 
     for (key, upstream_name) in upstream_order.iter().enumerate() {
         // Find any authentication referencing this upstream and populate their key
-        for (_, upstream) in &mut config.upstreams {
+        for upstream in config.upstreams.values_mut() {
             if let Some(auth) = Arc::get_mut(upstream).unwrap().authentication.as_mut() {
                 match &mut auth.source {
                     config::authentication::AuthenticationSource::Upstream {
