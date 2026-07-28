@@ -27,7 +27,6 @@ async fn simple() {
         .await;
 
     let config = Config {
-        addr: "127.0.0.1:0".parse().unwrap(),
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
         },
@@ -35,7 +34,7 @@ async fn simple() {
         ..Default::default()
     };
     let server = Server::new(config).unwrap();
-    let server_uri = format!("http://{}", server.local_addr().unwrap());
+    let server_uri = format!("http://{}", server.local_addr(0).unwrap());
     tokio::spawn(async move {
         server.run().await.unwrap();
         println!("server task eneded!!");
@@ -58,7 +57,6 @@ async fn simple_http2() {
         .await;
 
     let config = Config {
-        addr: "127.0.0.1:0".parse().unwrap(),
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
         },
@@ -66,7 +64,7 @@ async fn simple_http2() {
         ..Default::default()
     };
     let server = Server::new(config).unwrap();
-    let server_uri = format!("http://{}", server.local_addr().unwrap());
+    let server_uri = format!("http://{}", server.local_addr(0).unwrap());
     tokio::spawn(async move {
         server.run().await.unwrap();
         println!("server task eneded!!");
@@ -97,7 +95,6 @@ async fn simple_tls() {
             certs: cert_file.path().to_str().unwrap().into(),
             private_key: key_file.path().to_str().unwrap().into(),
         }),
-        addr: "127.0.0.1:0".parse().unwrap(),
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
         },
@@ -105,7 +102,7 @@ async fn simple_tls() {
         ..Default::default()
     };
     let server = Server::new(config).unwrap();
-    let server_uri = format!("https://localhost:{}", server.local_addr().unwrap().port());
+    let server_uri = format!("https://localhost:{}", server.local_addr(0).unwrap().port());
     tokio::spawn(async move {
         server.run().await.unwrap();
     });
@@ -135,7 +132,6 @@ async fn simple_tls_http2() {
             certs: cert_file.path().to_str().unwrap().into(),
             private_key: key_file.path().to_str().unwrap().into(),
         }),
-        addr: "127.0.0.1:0".parse().unwrap(),
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
         },
@@ -143,7 +139,7 @@ async fn simple_tls_http2() {
         ..Default::default()
     };
     let server = Server::new(config).unwrap();
-    let server_uri = format!("https://localhost:{}", server.local_addr().unwrap().port());
+    let server_uri = format!("https://localhost:{}", server.local_addr(0).unwrap().port());
     tokio::spawn(async move {
         server.run().await.unwrap();
     });
@@ -172,7 +168,6 @@ async fn simple_tls_acme() {
             domains: Arc::from(["localhost".to_string()]),
             cache_dir: temp_dir.path().to_path_buf(),
         }),
-        addr: "127.0.0.1:0".parse().unwrap(),
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
         },
@@ -180,7 +175,7 @@ async fn simple_tls_acme() {
         ..Default::default()
     };
     let server = Server::new(config).unwrap();
-    let server_uri = format!("https://localhost:{}", server.local_addr().unwrap().port());
+    let server_uri = format!("https://localhost:{}", server.local_addr(0).unwrap().port());
     tokio::spawn(async move {
         server.run().await.unwrap();
     });
@@ -202,7 +197,6 @@ async fn remove_match() {
         .await;
 
     let config = Config {
-        addr: "127.0.0.1:0".parse().unwrap(),
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
         },
@@ -210,7 +204,7 @@ async fn remove_match() {
         ..Default::default()
     };
     let server = Server::new(config).unwrap();
-    let server_uri = format!("http://{}/service", server.local_addr().unwrap());
+    let server_uri = format!("http://{}/service", server.local_addr(0).unwrap());
     tokio::spawn(async move {
         server.run().await.unwrap();
         println!("server task eneded!!");
@@ -239,7 +233,6 @@ async fn upgrade() {
     .await;
 
     let config = Config {
-        addr: "127.0.0.1:0".parse().unwrap(),
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
         },
@@ -247,7 +240,7 @@ async fn upgrade() {
         ..Default::default()
     };
     let server = Server::new(config).unwrap();
-    let server_addr = server.local_addr().unwrap();
+    let server_addr = server.local_addr(0).unwrap();
     tokio::spawn(async move {
         server.run().await.unwrap();
     });
@@ -295,7 +288,6 @@ async fn h2_upstream() {
         .await;
 
     let config = Config {
-        addr: "127.0.0.1:0".parse().unwrap(),
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_h2_upstream()
         },
@@ -303,7 +295,7 @@ async fn h2_upstream() {
         ..Default::default()
     };
     let server = Server::new(config).unwrap();
-    let server_uri = format!("http://{}", server.local_addr().unwrap());
+    let server_uri = format!("http://{}", server.local_addr(0).unwrap());
     tokio::spawn(async move {
         server.run().await.unwrap();
     });
@@ -344,7 +336,6 @@ async fn simple_h3_http1_upstream() {
             certs: cert_file.path().to_str().unwrap().into(),
             private_key: key_file.path().to_str().unwrap().into(),
         }),
-        addr: "127.0.0.1:0".parse().unwrap(),
         h3_addr: Some("[::1]:0".parse().unwrap()),
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_upstream()
@@ -393,7 +384,6 @@ async fn simple_h3_h2_upstream() {
             certs: cert_file.path().to_str().unwrap().into(),
             private_key: key_file.path().to_str().unwrap().into(),
         }),
-        addr: "127.0.0.1:0".parse().unwrap(),
         h3_addr: Some("[::1]:0".parse().unwrap()),
         upstreams: hashmap! {
             upstream.id().to_string() => upstream.as_h2_upstream()

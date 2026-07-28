@@ -152,9 +152,11 @@ impl http_body::Body for H3Body {
         // Must now be ready for Trailers
         if self.state == BodyState::Trailers {
             match ready!(self.stream.poll_recv_trailers(cx)) {
-                Ok(trailers) => if let Some(trailers) = trailers {
-                    return Poll::Ready(Some(Ok(Frame::trailers(trailers))));
-                },
+                Ok(trailers) => {
+                    if let Some(trailers) = trailers {
+                        return Poll::Ready(Some(Ok(Frame::trailers(trailers))));
+                    }
+                }
                 Err(err) => return Poll::Ready(Some(Err(err.into()))),
             }
         }

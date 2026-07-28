@@ -1,6 +1,15 @@
 {
 	"$schema": "schema.json",
-	"addr": "127.0.0.1:4000",
+	"tcp_addrs": [
+		{
+			"addr": "127.0.0.1:4000",
+			"proxy_protocol": false
+		},
+		{
+			"addr": "127.0.0.1:4001",
+			"proxy_protocol": true
+		}
+	],
 	"prometheus_addr": "127.0.0.1:9001",
 	"rules": [
 		{
@@ -15,7 +24,9 @@
 			},
 			"upstream": "server",
 			"cache": {
-				"methods": ["GET"]
+				"methods": [
+					"GET"
+				]
 			}
 		}
 	],
@@ -24,7 +35,10 @@
 			"addr": "http://127.0.0.1:2999",
 			"max_connections": 10,
 			"authentication": {
-				"exclude": ["/", "/posts"],
+				"exclude": [
+					"/",
+					"/posts"
+				],
 				"source": {
 					"upstream": {
 						"name": "server",

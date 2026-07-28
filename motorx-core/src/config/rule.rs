@@ -38,7 +38,7 @@ impl Rule {
                 None if self.host.is_some() => {
                     tracing::warn!("Request missing host");
                     return false;
-                },
+                }
                 None => None,
             },
         };

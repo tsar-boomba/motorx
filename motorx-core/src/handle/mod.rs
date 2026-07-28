@@ -100,10 +100,9 @@ async fn handle_match(
     //   - "upgrade" is not empty
     let connection_header = req.headers().get(CONNECTION);
     let upgrade_header = req.headers().get(UPGRADE);
-    let upgrading = connection_header.is_some_and(|v| {
-        v.to_str()
-            .is_ok_and(|v| v.eq_ignore_ascii_case("upgrade"))
-    }) && upgrade_header.is_some_and(|v| !v.is_empty());
+    let upgrading = connection_header
+        .is_some_and(|v| v.to_str().is_ok_and(|v| v.eq_ignore_ascii_case("upgrade")))
+        && upgrade_header.is_some_and(|v| !v.is_empty());
 
     if upgrading {
         return upgrade::handle_upgrade(req, upstream, peer_addr).await;

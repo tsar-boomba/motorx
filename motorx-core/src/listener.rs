@@ -1,15 +1,26 @@
-use std::{io, net::SocketAddr, pin::Pin, sync::Arc, time::Duration};
+use std::{
+    io,
+    net::{Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, SocketAddrV6},
+    pin::Pin,
+    sync::Arc,
+    time::Duration,
+};
 
 use futures_util::StreamExt;
 use tokio::{
-    io::{AsyncRead, AsyncWrite, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     time::timeout,
 };
 
 use crate::{config::Tls, Config};
 
-pub(crate) enum Listener {
+pub(crate) struct Listener {
+    inner: ListenerInner,
+    proxy_protocol: bool,
+}
+
+pub(crate) enum ListenerInner {
     Plain(tokio::net::TcpListener),
     #[cfg(feature = "tls")]
     FileTls(tokio::net::TcpListener, Arc<rustls::ServerConfig>),
@@ -31,7 +42,11 @@ pub(crate) enum Stream {
 }
 
 impl Listener {
-    pub(crate) fn from_config(config: &Config) -> Result<Self, crate::Error> {
+    pub(crate) fn from_config(
+        addr: SocketAddr,
+        proxy_protocol: bool,
+        config: &Config,
+    ) -> Result<Self, crate::Error> {
         if let Some(tls) = &config.tls {
             #[cfg(feature = "tls")]
             {
@@ -63,10 +78,13 @@ impl Listener {
                             Arc::new(cfg)
                         };
 
-                        Ok(Self::FileTls(crate::tcp_listener(config.addr)?, tls_config))
+                        Ok(Self {
+                            inner: ListenerInner::FileTls(crate::tcp_listener(addr)?, tls_config),
+                            proxy_protocol,
+                        })
                     }
                     Tls::Acme { domains, cache_dir } => {
-                        let listener = crate::tcp_listener(config.addr)?;
+                        let listener = crate::tcp_listener(addr)?;
                         let local_addr = listener.local_addr()?;
                         let prod = !domains.contains(&"localhost".to_string());
                         let mut state = AcmeConfig::new(&**domains)
@@ -86,39 +104,48 @@ impl Listener {
                             }
                         });
 
-                        Ok(Self::AcmeTls {
-                            listener,
-                            challenge_config,
-                            server_config: Arc::new(server_config),
-                            local_addr,
+                        Ok(Self {
+                            inner: ListenerInner::AcmeTls {
+                                listener,
+                                challenge_config,
+                                server_config: Arc::new(server_config),
+                                local_addr,
+                            },
+                            proxy_protocol,
                         })
                     }
                 }
             }
 
             #[cfg(not(feature = "tls"))]
-            Ok(Self::Plain(crate::tcp_listener(config.addr)?))
+            Ok(Self {
+                inner: ListenerInner::Plain(crate::tcp_listener(addr)?),
+                proxy_protocol,
+            })
         } else {
-            Ok(Self::Plain(crate::tcp_listener(config.addr)?))
+            Ok(Self {
+                inner: ListenerInner::Plain(crate::tcp_listener(addr)?),
+                proxy_protocol,
+            })
         }
     }
 
     pub(crate) fn local_addr(&self) -> io::Result<SocketAddr> {
-        match self {
-            Listener::Plain(tcp_listener) => tcp_listener.local_addr(),
+        match &self.inner {
+            ListenerInner::Plain(tcp_listener) => tcp_listener.local_addr(),
             #[cfg(feature = "tls")]
-            Listener::FileTls(tcp_listener, _) => tcp_listener.local_addr(),
+            ListenerInner::FileTls(tcp_listener, _) => tcp_listener.local_addr(),
             #[cfg(feature = "tls")]
-            Listener::AcmeTls { local_addr, .. } => Ok(*local_addr),
+            ListenerInner::AcmeTls { local_addr, .. } => Ok(*local_addr),
         }
     }
 
     #[cfg(feature = "tls")]
     pub(crate) fn server_config(&self) -> Option<Arc<rustls::ServerConfig>> {
-        match self {
-            Listener::Plain(_) => None,
-            Listener::FileTls(_, server_config) => Some(server_config.clone()),
-            Listener::AcmeTls {
+        match &self.inner {
+            ListenerInner::Plain(_) => None,
+            ListenerInner::FileTls(_, server_config) => Some(server_config.clone()),
+            ListenerInner::AcmeTls {
                 listener: _,
                 challenge_config: _,
                 server_config,
@@ -127,32 +154,51 @@ impl Listener {
         }
     }
 
-    pub(crate) async fn accept(&mut self) -> io::Result<(Stream, SocketAddr)> {
-        match self {
-            Listener::Plain(tcp_listener) => tcp_listener
-                .accept()
-                .await
-                .map(|(s, peer)| (Stream::Plain(s), peer)),
+    /// Returns a new connection once one is ready. If `proxy_protocol` was enabled,
+    /// the SocketAddr will be the address of the original peer
+    pub(crate) async fn accept(&self) -> io::Result<(Stream, SocketAddr)> {
+        match &self.inner {
+            ListenerInner::Plain(tcp_listener) => {
+                let (mut tcp_stream, mut peer) = tcp_listener.accept().await?;
+
+                if self.proxy_protocol {
+                    let real_peer_addr = parse_proxy_header(&mut tcp_stream, peer).await?;
+                    peer = real_peer_addr;
+                }
+
+                Ok((Stream::Plain(tcp_stream), peer))
+            }
             #[cfg(feature = "tls")]
-            Listener::FileTls(tcp_listener, server_config) => {
-                let (tcp_stream, peer) = tcp_listener.accept().await?;
+            ListenerInner::FileTls(tcp_listener, server_config) => {
+                let (mut tcp_stream, mut peer) = tcp_listener.accept().await?;
+
+                if self.proxy_protocol {
+                    let real_peer_addr = parse_proxy_header(&mut tcp_stream, peer).await?;
+                    peer = real_peer_addr;
+                }
+
                 let tls_stream =
                     crate::tls::stream::TlsStream::new(tcp_stream, server_config.clone());
                 Ok((Stream::FileTls(tls_stream), peer))
             }
             #[cfg(feature = "tls")]
-            Listener::AcmeTls {
+            ListenerInner::AcmeTls {
                 listener,
                 challenge_config,
                 server_config,
                 local_addr: _local_addr,
             } => loop {
                 tracing::trace!("Accepting connection with ACME...");
-                let (stream, peer) = listener.accept().await?;
+                let (mut tcp_stream, mut peer) = listener.accept().await?;
+
+                if self.proxy_protocol {
+                    let real_peer_addr = parse_proxy_header(&mut tcp_stream, peer).await?;
+                    peer = real_peer_addr;
+                }
 
                 let Ok(start_handshake) = timeout(
                     Duration::from_secs(2),
-                    tokio_rustls::LazyConfigAcceptor::new(Default::default(), stream),
+                    tokio_rustls::LazyConfigAcceptor::new(Default::default(), tcp_stream),
                 )
                 .await
                 else {
@@ -303,5 +349,85 @@ impl AsyncWrite for Stream {
             #[cfg(feature = "tls")]
             Stream::AcmeTls(tls_stream, _) => Pin::new(tls_stream).poll_write_vectored(cx, bufs),
         }
+    }
+}
+
+/// The 12-byte block that every PROXY protocol v2 header starts with.
+const SIGNATURE: [u8; 12] = [
+    0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A,
+];
+
+/// Reads the first bytes of a tcp stream expecting a Proxy Protocol v2 header.
+/// Returns the source ip and port.
+async fn parse_proxy_header(tcp_stream: &mut TcpStream, peer: SocketAddr) -> Result<SocketAddr, io::Error> {
+    // Fixed 16-byte prefix: 12 signature + 1 ver/cmd + 1 fam/proto + 2 length.
+    let mut header = [0u8; 16];
+    tcp_stream.read_exact(&mut header).await?;
+
+    if header[..12] != SIGNATURE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid PROXY protocol v2 signature",
+        ));
+    }
+
+    // Byte 12: high nibble = version (must be 2), low nibble = command.
+    if header[12] >> 4 != 2 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unsupported PROXY protocol version",
+        ));
+    }
+    let command = header[12] & 0x0F; // 0 = LOCAL, 1 = PROXY
+
+    // Byte 13: high nibble = address family, low nibble = transport protocol.
+    let family = header[13] >> 4; // 1 = AF_INET, 2 = AF_INET6, 3 = AF_UNIX
+
+    // Bytes 14..16: length of the address block that follows (big-endian).
+    let addr_len = u16::from_be_bytes([header[14], header[15]]) as usize;
+
+    // Always drain the full block so the stream is positioned at the payload,
+    // even when we end up ignoring the contents (LOCAL, or trailing TLVs).
+    let mut addrs = vec![0u8; addr_len];
+    tcp_stream.read_exact(&mut addrs).await?;
+
+    // LOCAL: the sender has no real client to declare (health checks, etc.);
+    // fall back to the underlying socket's real peer address.
+    if command == 0 {
+        return Ok(peer);
+    }
+
+    match family {
+        // AF_INET: src_addr[4] dst_addr[4] src_port[2] dst_port[2]
+        1 => {
+            if addrs.len() < 12 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "truncated IPv4 address block",
+                ));
+            }
+            let ip = Ipv4Addr::new(addrs[0], addrs[1], addrs[2], addrs[3]);
+            let port = u16::from_be_bytes([addrs[8], addrs[9]]);
+            Ok(SocketAddr::V4(SocketAddrV4::new(ip, port)))
+        }
+        // AF_INET6: src_addr[16] dst_addr[16] src_port[2] dst_port[2]
+        2 => {
+            if addrs.len() < 36 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "truncated IPv6 address block",
+                ));
+            }
+            let mut octets = [0u8; 16];
+            octets.copy_from_slice(&addrs[0..16]);
+            let ip = Ipv6Addr::from(octets);
+            let port = u16::from_be_bytes([addrs[32], addrs[33]]);
+            Ok(SocketAddr::V6(SocketAddrV6::new(ip, port, 0, 0)))
+        }
+        // AF_UNSPEC (0) or AF_UNIX (3) don't map to an IP SocketAddr.
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unsupported PROXY protocol address family",
+        )),
     }
 }

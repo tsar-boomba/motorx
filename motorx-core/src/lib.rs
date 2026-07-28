@@ -37,7 +37,8 @@ use cache::Cache;
 use config::Upstream;
 use conn_pool::Pool;
 use futures_util::future::join;
-use futures_util::TryStreamExt;
+use futures_util::stream::FuturesUnordered;
+use futures_util::{StreamExt, TryStreamExt};
 use handle::handle_req;
 use http::header::{ALT_SVC, HOST};
 use http::{HeaderValue, Response};
@@ -46,6 +47,7 @@ use hyper::body::Incoming;
 use hyper::service::service_fn;
 use hyper::Request;
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
+use itertools::Itertools;
 use listener::Listener;
 #[cfg(feature = "tls")]
 use tls::stream::TlsStream;
@@ -80,7 +82,7 @@ pub struct Server {
     upstreams: Arc<Upstreams>,
     #[cfg(feature = "prometheus")]
     stats_collector: prometheus::StatsCollector,
-    listener: Mutex<Option<Listener>>,
+    listeners: Mutex<Option<Vec<Listener>>>,
     #[cfg(feature = "h3")]
     h3_listener: Mutex<Option<h3::Listener>>,
     /// Used to enforce max num of connections to this server
@@ -94,14 +96,20 @@ impl Server {
 
         config.rules.sort_by(|a, b| a.path.cmp(&b.path));
         let config = Arc::new(config);
-        let listener = Listener::from_config(&config)?;
+        let listeners: Vec<_> = config
+            .tcp_addrs
+            .iter()
+            .map(|tcp_config| {
+                Listener::from_config(tcp_config.addr, tcp_config.proxy_protocol, &config)
+            })
+            .try_collect()?;
 
         #[cfg(feature = "h3")]
         let h3_listener = Mutex::new({
             if config.h3_addr.is_some() {
                 // Only start h3 if the address is set and TLS is enabled
-
-                if let Some(server_config) = listener.server_config() {
+                // TODO: if we do tls stuff in tcp config this needs to change, but chill for now
+                if let Some(server_config) = listeners[0].server_config() {
                     Some(h3::Listener::new(config.clone(), &server_config))
                 } else {
                     tracing::warn!("Not starting h3 server since TLS isn't enabled.");
@@ -115,9 +123,11 @@ impl Server {
 
         tracing::debug!("Starting with config: {:#?}", *config);
 
-        tracing::info!("Motorx proxy listening on http://{}", {
-            listener.local_addr().unwrap()
-        });
+        for listener in &listeners {
+            tracing::info!("Motorx proxy listening on http://{}", {
+                listener.local_addr().unwrap()
+            });
+        }
 
         Ok(Self {
             semaphore: Arc::new(Semaphore::new(config.max_connections)),
@@ -126,18 +136,18 @@ impl Server {
             config,
             #[cfg(feature = "prometheus")]
             stats_collector: prometheus::StatsCollector::new(),
-            listener: Mutex::new(Some(listener)),
+            listeners: Mutex::new(Some(listeners)),
             #[cfg(feature = "h3")]
             h3_listener,
         })
     }
 
-    pub fn local_addr(&self) -> std::io::Result<SocketAddr> {
-        self.listener
+    pub fn local_addr(&self, i: usize) -> std::io::Result<SocketAddr> {
+        self.listeners
             .lock()
             .unwrap()
             .as_ref()
-            .expect("cannot call after run")
+            .expect("cannot call after run")[i]
             .local_addr()
     }
 
@@ -193,8 +203,8 @@ impl Server {
     }
 
     fn run_tcp(&self) -> impl Future<Output = Result<(), crate::Error>> + 'static {
-        let mut listener = self
-            .listener
+        let listeners = self
+            .listeners
             .lock()
             .unwrap()
             .take()
@@ -210,29 +220,23 @@ impl Server {
             loop {
                 tracing::trace!("[tcp] {} permits left", semaphore.available_permits());
                 if let Ok(permit) = semaphore.clone().acquire_owned().await {
-                    match listener.accept().await {
-                        Ok((stream, peer_addr)) => {
-                            tracing::trace!("Accepted connection from {}", peer_addr);
-                            let domain = stream.domain();
-                            #[cfg(feature = "prometheus")]
-                            stats_collector.add_tcp_conn();
+                    let (stream, peer_addr) = accept_next(&listeners).await;
+                    tracing::debug!("Accepted connection from {}", peer_addr);
+                    let domain = stream.domain();
+                    #[cfg(feature = "prometheus")]
+                    stats_collector.add_tcp_conn();
 
-                            handle_connection(
-                                BufReader::with_capacity(config.client_buffer_size, stream),
-                                peer_addr,
-                                domain,
-                                config.clone(),
-                                cache.clone(),
-                                upstreams.clone(),
-                                permit,
-                                #[cfg(feature = "prometheus")]
-                                stats_collector.clone(),
-                            );
-                        }
-                        Err(e) => {
-                            tracing::error!("Error accepting, {:?}", e);
-                        }
-                    }
+                    handle_connection(
+                        BufReader::with_capacity(config.client_buffer_size, stream),
+                        peer_addr,
+                        domain,
+                        config.clone(),
+                        cache.clone(),
+                        upstreams.clone(),
+                        permit,
+                        #[cfg(feature = "prometheus")]
+                        stats_collector.clone(),
+                    );
                 }
             }
         }
@@ -433,8 +437,7 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     cache: Arc<Cache>,
     conn_pools: Arc<Upstreams>,
     permit: OwnedSemaphorePermit,
-    #[cfg(feature = "prometheus")]
-    stats_collector: prometheus::StatsCollector,
+    #[cfg(feature = "prometheus")] stats_collector: prometheus::StatsCollector,
 ) {
     #[cfg(feature = "h3")]
     let h3_port = config.h3_addr.map(|s| s.port());
@@ -535,9 +538,7 @@ fn extract_host<B>(req: &Request<B>) -> Option<&str> {
         Some(host) => Some(host),
         None => match req.headers().get(HOST) {
             Some(host_header) => host_header.to_str().ok(),
-            None => {
-                None
-            }
+            None => None,
         },
     }
 }
@@ -593,4 +594,26 @@ fn init_upstreams(config: &mut Config) -> Upstreams {
     upstreams.shrink_to_fit();
 
     upstreams
+}
+
+/// Loops until a connection comes in on one of the listeners
+async fn accept_next(listeners: &[Listener]) -> (listener::Stream, SocketAddr) {
+    let mut futures = FuturesUnordered::new();
+
+    loop {
+        futures.clear();
+
+        for listener in listeners {
+            futures.push(listener.accept());
+        }
+
+        while let Some(res) = futures.next().await {
+            match res {
+                Ok(accepted) => return accepted,
+                Err(err) => {
+                    tracing::error!("accept error: {err:?}");
+                }
+            }
+        }
+    }
 }

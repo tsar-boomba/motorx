@@ -1,7 +1,7 @@
 use std::{fs, io, path::Path};
 
 use itertools::Itertools;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
+use rustls::pki_types::{pem::PemObject, CertificateDer, PrivateKeyDer};
 
 pub mod stream;
 

@@ -13,7 +13,7 @@ use self::authentication::Authentication;
 #[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
 #[derive(Debug)]
 pub struct Config {
-    pub addr: SocketAddr,
+    pub tcp_addrs: Vec<TcpAddr>,
     #[cfg(feature = "h3")]
     #[cfg_attr(all(feature = "h3", feature = "serde-config"), serde(default))]
     pub h3_addr: Option<SocketAddr>,
@@ -33,6 +33,23 @@ pub struct Config {
         serde(default = "default_client_buffer_size")
     )]
     pub client_buffer_size: usize,
+}
+
+#[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
+#[derive(Debug)]
+pub struct TcpAddr {
+    pub addr: SocketAddr,
+    #[cfg_attr(feature = "serde-config", serde(default))]
+    pub proxy_protocol: bool,
+}
+
+impl From<SocketAddr> for TcpAddr {
+    fn from(value: SocketAddr) -> Self {
+        Self {
+            addr: value,
+            proxy_protocol: false,
+        }
+    }
 }
 
 #[cfg_attr(feature = "serde-config", derive(serde::Deserialize))]
@@ -100,10 +117,11 @@ const fn default_client_buffer_size() -> usize {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            addr: SocketAddr::V4(std::net::SocketAddrV4::new(
-                std::net::Ipv4Addr::new(0, 0, 0, 0),
-                80,
-            )),
+            tcp_addrs: vec![SocketAddr::V4(std::net::SocketAddrV4::new(
+                std::net::Ipv4Addr::new(127, 0, 0, 1),
+                0,
+            ))
+            .into()],
             tls: Default::default(),
             max_connections: default_server_max_connections(),
             client_buffer_size: default_client_buffer_size(),

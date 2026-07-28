@@ -4,150 +4,192 @@
 	"title": "Motorx Config",
 	"description": "Configuration for Motorx reverse-proxy server.",
 	"type": "object",
-	"required": ["addr", "rules"],
+	"required": [
+		"tcp_addrs",
+		"rules"
+	],
 	"properties": {
-		"addr": {
-			"description": "Tcp socket the proxy should listen on ex. 127.0.0.1:4000",
-			"type": "string"
-		},
-		"max_connections": {
-			"description": "Max number of connections allowed to the proxy. (default 100)",
-			"type": "integer"
-		},
-		"rules": {
-			"description": "Rules for routing requests to upstream servers.",
+		"tcp_addrs": {
+			"description": "TCP sockets the proxy should listen on",
 			"type": "array",
+			"minItems": 1,
 			"items": {
-				"$ref": "#/definitions/rule"
-			},
-			"minItems": 1
-		},
-		"upstreams": {
-			"type": "object",
-			"additionalProperties": { "$ref": "#/definitions/upstream" },
-			"minProperties": 1
-		}
-	},
-	"definitions": {
-		"rule": {
-			"title": "Rule",
-			"description": "Rule for matching and proxying requests.",
-			"type": "object",
-			"properties": {
-				"path": { "$ref": "#/definitions/match_type" },
-				"upstream": {
-					"description": "Address of upstream server matched requests should be proxied to.",
-					"type": "string"
-				},
-				"match_headers": {
-					"description": "Object of header names and matchers to only allow requests with specific headers through.",
-					"type": "object",
-					"additionalProperties": { "$ref": "#/definitions/match_type" }
-				},
-				"cache": { "$ref": "#/definitions/cache" }
-			},
-			"required": ["path", "upstream"]
-		},
-		"cache": {
-			"title": "Cache Settings",
-			"description": "Control caching for a rule.",
-			"type": "object",
-			"properties": {
-				"methods": {
-					"description": "What methods should have their requests cached",
-					"type": "array",
-					"minItems": 1,
-					"items": {
-						"type": "string"
+				"description": "TCP socket descriptions",
+				"required": ["addr"],
+				"properties": {
+					"addr": {
+						"type": "string",
+						"description": "TCP socket addr (ex: 127.0.0.1:443)"
+					},
+					"proxy_protocol": {
+						"type": "boolean",
+						"description": "Whether or not streams on this socket will start with a Proxy Protocol header"
 					}
-				},
-				"max_age": {
-					"description": "How long, using `std::time::Duration`'s deserialization until responses are stale.",
-					"type": "string"
 				}
+			},
+			"max_connections": {
+				"description": "Max number of connections allowed to the proxy. (default 100)",
+				"type": "integer"
+			},
+			"rules": {
+				"description": "Rules for routing requests to upstream servers.",
+				"type": "array",
+				"items": {
+					"$ref": "#/definitions/rule"
+				},
+				"minItems": 1
+			},
+			"upstreams": {
+				"type": "object",
+				"additionalProperties": {
+					"$ref": "#/definitions/upstream"
+				},
+				"minProperties": 1
 			}
 		},
-		"match_type": {
-			"title": "Matcher",
-			"description": "Match against a subject (ex. path, header, query)",
-			"anyOf": [
-				{
-					"type": "object",
-					"requiredProperties": ["start"],
-					"properties": {
-						"start": {
-							"description": "Matches from the start of subject string.",
-							"type": "string"
+		"definitions": {
+			"rule": {
+				"title": "Rule",
+				"description": "Rule for matching and proxying requests.",
+				"type": "object",
+				"properties": {
+					"path": {
+						"$ref": "#/definitions/match_type"
+					},
+					"upstream": {
+						"description": "Address of upstream server matched requests should be proxied to.",
+						"type": "string"
+					},
+					"match_headers": {
+						"description": "Object of header names and matchers to only allow requests with specific headers through.",
+						"type": "object",
+						"additionalProperties": {
+							"$ref": "#/definitions/match_type"
 						}
-					}
-				}
-			]
-		},
-		"authentication_source": {
-			"title": "Authentication Source",
-			"description": "Where to send request for authentication.",
-			"anyOf": [
-				{
-					"type": "object",
-					"requiredProperties": ["path"],
-					"properties": {
-						"path": {
-							"description": "Path to send the request to, on this upstream.",
-							"type": "string"
-						}
+					},
+					"cache": {
+						"$ref": "#/definitions/cache"
 					}
 				},
-				{
-					"type": "object",
-					"requiredProperties": ["upstream"],
-					"properties": {
-						"upstream": {
-							"type": "object",
-							"requiredProperties": ["name", "path"],
-							"properties": {
-								"name": {
-									"description": "Name of upstream to send requests to for authentication.",
-									"type": "string"
-								},
-								"path": {
-									"description": "Path to send the request to, on the other upstream.",
-									"type": "string"
+				"required": [
+					"path",
+					"upstream"
+				]
+			},
+			"cache": {
+				"title": "Cache Settings",
+				"description": "Control caching for a rule.",
+				"type": "object",
+				"properties": {
+					"methods": {
+						"description": "What methods should have their requests cached",
+						"type": "array",
+						"minItems": 1,
+						"items": {
+							"type": "string"
+						}
+					},
+					"max_age": {
+						"description": "How long, using `std::time::Duration`'s deserialization until responses are stale.",
+						"type": "string"
+					}
+				}
+			},
+			"match_type": {
+				"title": "Matcher",
+				"description": "Match against a subject (ex. path, header, query)",
+				"anyOf": [
+					{
+						"type": "object",
+						"requiredProperties": [
+							"start"
+						],
+						"properties": {
+							"start": {
+								"description": "Matches from the start of subject string.",
+								"type": "string"
+							}
+						}
+					}
+				]
+			},
+			"authentication_source": {
+				"title": "Authentication Source",
+				"description": "Where to send request for authentication.",
+				"anyOf": [
+					{
+						"type": "object",
+						"requiredProperties": [
+							"path"
+						],
+						"properties": {
+							"path": {
+								"description": "Path to send the request to, on this upstream.",
+								"type": "string"
+							}
+						}
+					},
+					{
+						"type": "object",
+						"requiredProperties": [
+							"upstream"
+						],
+						"properties": {
+							"upstream": {
+								"type": "object",
+								"requiredProperties": [
+									"name",
+									"path"
+								],
+								"properties": {
+									"name": {
+										"description": "Name of upstream to send requests to for authentication.",
+										"type": "string"
+									},
+									"path": {
+										"description": "Path to send the request to, on the other upstream.",
+										"type": "string"
+									}
 								}
 							}
 						}
 					}
-				}
-			]
-		},
-		"upstream": {
-			"description": "A server which requests can be proxied to",
-			"type": "object",
-			"properties": {
-				"addr": {
-					"description": "Address of upstream server.",
-					"type": "string"
-				},
-				"max_connections": {
-					"description": "Maximum number of connections to this upstream server.",
-					"type": "integer"
-				},
-				"authentication": {
-					"description": "How requests to this upstream should be authorized.",
-					"type": "object",
-					"requiredProperties": [],
-					"properties": {
-						"exclude": {
-							"description": "Paths to exclude from authentication (ex. /exclude, /exclude/*/with-wildcard)",
-							"type": "array",
-							"items": {
-								"type": "string"
-							}
-						},
-						"source": { "$ref": "#/definitions/authentication_source" }
-					}
-				}
+				]
 			},
-			"required": ["addr"]
+			"upstream": {
+				"description": "A server which requests can be proxied to",
+				"type": "object",
+				"properties": {
+					"addr": {
+						"description": "Address of upstream server.",
+						"type": "string"
+					},
+					"max_connections": {
+						"description": "Maximum number of connections to this upstream server.",
+						"type": "integer"
+					},
+					"authentication": {
+						"description": "How requests to this upstream should be authorized.",
+						"type": "object",
+						"requiredProperties": [],
+						"properties": {
+							"exclude": {
+								"description": "Paths to exclude from authentication (ex. /exclude, /exclude/*/with-wildcard)",
+								"type": "array",
+								"items": {
+									"type": "string"
+								}
+							},
+							"source": {
+								"$ref": "#/definitions/authentication_source"
+							}
+						}
+					}
+				},
+				"required": [
+					"addr"
+				]
+			}
 		}
 	}
 }

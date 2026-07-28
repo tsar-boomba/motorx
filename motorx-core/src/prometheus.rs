@@ -24,15 +24,15 @@ struct ReqLabels {
     method: Method,
     path: SharedStr,
     version: Version,
-	host: Option<SharedStr>,
+    host: Option<SharedStr>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
 struct ResLabels {
     status: StatusCode,
     version: Version,
-	path: SharedStr,
-	host: Option<SharedStr>,
+    path: SharedStr,
+    host: Option<SharedStr>,
 }
 
 #[derive(Clone, Debug, Hash, PartialEq, Eq, EncodeLabelSet)]
@@ -99,7 +99,7 @@ impl StatsCollector {
                 method: Method(req.method().clone()),
                 path: SharedStr(path),
                 version: Version(req.version()),
-				host: host.map(SharedStr)
+                host: host.map(SharedStr),
             })
             .inc();
     }
@@ -109,8 +109,8 @@ impl StatsCollector {
             .get_or_create(&ResLabels {
                 status: StatusCode(res.status()),
                 version: Version(res.version()),
-				path: SharedStr(path),
-				host: host.map(SharedStr)
+                path: SharedStr(path),
+                host: host.map(SharedStr),
             })
             .inc();
     }
@@ -132,14 +132,17 @@ impl StatsCollector {
     }
 
     pub fn encode(&self, to: &mut BytesMut) -> Result<(), std::fmt::Error> {
-		encode(to, &self.registry)
+        encode(to, &self.registry)
     }
 }
 
 impl EncodeLabelValue for SharedStr {
-	fn encode(&self, encoder: &mut prometheus_client::encoding::LabelValueEncoder) -> Result<(), std::fmt::Error> {
-		encoder.write_str(&self.0)
-	}
+    fn encode(
+        &self,
+        encoder: &mut prometheus_client::encoding::LabelValueEncoder,
+    ) -> Result<(), std::fmt::Error> {
+        encoder.write_str(&self.0)
+    }
 }
 
 impl EncodeLabelValue for Method {
