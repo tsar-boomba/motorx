@@ -162,8 +162,22 @@ impl Listener {
                 let (mut tcp_stream, mut peer) = tcp_listener.accept().await?;
 
                 if self.proxy_protocol {
-                    let real_peer_addr = parse_proxy_header(&mut tcp_stream, peer).await?;
-                    peer = real_peer_addr;
+                    peer = match timeout(
+                        Duration::from_secs(2),
+                        parse_proxy_header(&mut tcp_stream, peer),
+                    )
+                    .await
+                    {
+                        Ok(Ok(addr)) => addr,
+                        Ok(Err(e)) => return Err(e),
+                        Err(_) => {
+                            tracing::warn!("Timeout reading PROXY header from {peer}");
+                            return Err(io::Error::new(
+                                io::ErrorKind::TimedOut,
+                                "proxy header timeout",
+                            ));
+                        }
+                    };
                 }
 
                 Ok((Stream::Plain(tcp_stream), peer))
@@ -173,8 +187,22 @@ impl Listener {
                 let (mut tcp_stream, mut peer) = tcp_listener.accept().await?;
 
                 if self.proxy_protocol {
-                    let real_peer_addr = parse_proxy_header(&mut tcp_stream, peer).await?;
-                    peer = real_peer_addr;
+                    peer = match timeout(
+                        Duration::from_secs(2),
+                        parse_proxy_header(&mut tcp_stream, peer),
+                    )
+                    .await
+                    {
+                        Ok(Ok(addr)) => addr,
+                        Ok(Err(e)) => return Err(e),
+                        Err(_) => {
+                            tracing::warn!("Timeout reading PROXY header from {peer}");
+                            return Err(io::Error::new(
+                                io::ErrorKind::TimedOut,
+                                "proxy header timeout",
+                            ));
+                        }
+                    };
                 }
 
                 let tls_stream =
@@ -192,8 +220,22 @@ impl Listener {
                 let (mut tcp_stream, mut peer) = listener.accept().await?;
 
                 if self.proxy_protocol {
-                    let real_peer_addr = parse_proxy_header(&mut tcp_stream, peer).await?;
-                    peer = real_peer_addr;
+                    peer = match timeout(
+                        Duration::from_secs(2),
+                        parse_proxy_header(&mut tcp_stream, peer),
+                    )
+                    .await
+                    {
+                        Ok(Ok(addr)) => addr,
+                        Ok(Err(e)) => return Err(e),
+                        Err(_) => {
+                            tracing::warn!("Timeout reading PROXY header from {peer}");
+                            return Err(io::Error::new(
+                                io::ErrorKind::TimedOut,
+                                "proxy header timeout",
+                            ));
+                        }
+                    };
                 }
 
                 let Ok(start_handshake) = timeout(
@@ -359,7 +401,10 @@ const SIGNATURE: [u8; 12] = [
 
 /// Reads the first bytes of a tcp stream expecting a Proxy Protocol v2 header.
 /// Returns the source ip and port.
-async fn parse_proxy_header(tcp_stream: &mut TcpStream, peer: SocketAddr) -> Result<SocketAddr, io::Error> {
+async fn parse_proxy_header(
+    tcp_stream: &mut TcpStream,
+    peer: SocketAddr,
+) -> Result<SocketAddr, io::Error> {
     // Fixed 16-byte prefix: 12 signature + 1 ver/cmd + 1 fam/proto + 2 length.
     let mut header = [0u8; 16];
     tcp_stream.read_exact(&mut header).await?;
