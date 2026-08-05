@@ -411,3 +411,88 @@ async fn simple_h3_h2_upstream() {
     let upstream_req = &upstream.requests_received().await[0];
     assert_eq!(upstream_req.body(), "hello h3!");
 }
+
+#[tokio::test]
+async fn multi_listener_proxy_protocol() {
+    use tokio::io::AsyncWriteExt;
+
+    use crate::config::TcpAddr;
+
+    utils::tracing();
+
+    let mut upstream =
+        TestUpstream::new(
+            |_| async move { Response::builder().body(Empty::new().boxed()).unwrap() },
+        )
+        .await;
+
+    let config = Config {
+        tcp_addrs: vec![
+            "127.0.0.1:0".parse::<std::net::SocketAddr>().unwrap().into(),
+            TcpAddr {
+                addr: "127.0.0.1:0".parse().unwrap(),
+                proxy_protocol: true,
+            },
+        ],
+        upstreams: hashmap! {
+            upstream.id().to_string() => upstream.as_upstream()
+        },
+        rules: vec![start_rule("/", &upstream, false)],
+        ..Default::default()
+    };
+    let server = Server::new(config).unwrap();
+    let plain_addr = server.local_addr(0).unwrap();
+    let pp_addr = server.local_addr(1).unwrap();
+    tokio::spawn(async move {
+        server.run().await.unwrap();
+    });
+
+    // A connection with an invalid PROXY header must not stall the listener
+    let mut bad = tcp_connect(pp_addr).await.unwrap();
+    bad.write_all(b"definitely not a proxy protocol header")
+        .await
+        .unwrap();
+
+    // Neither must a connection that never sends its header
+    let _idle = tcp_connect(pp_addr).await.unwrap();
+
+    let mut stream = tcp_connect(pp_addr).await.unwrap();
+    let mut header = Vec::new();
+    header.extend_from_slice(&[
+        0x0D, 0x0A, 0x0D, 0x0A, 0x00, 0x0D, 0x0A, 0x51, 0x55, 0x49, 0x54, 0x0A,
+    ]);
+    header.push(0x21); // v2, PROXY
+    header.push(0x11); // AF_INET, STREAM
+    header.extend_from_slice(&12u16.to_be_bytes());
+    header.extend_from_slice(&[1, 2, 3, 4]); // src addr
+    header.extend_from_slice(&[5, 6, 7, 8]); // dst addr
+    header.extend_from_slice(&9999u16.to_be_bytes()); // src port
+    header.extend_from_slice(&80u16.to_be_bytes()); // dst port
+    stream.write_all(&header).await.unwrap();
+    stream
+        .write_all(b"GET / HTTP/1.1\r\nhost: localhost\r\n\r\n")
+        .await
+        .unwrap();
+
+    let mut buf = [0u8; 1024];
+    let n = tokio::time::timeout(Duration::from_secs(5), stream.read(&mut buf))
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(buf[..n].starts_with(b"HTTP/1.1 200"));
+
+    // The plain listener still works alongside
+    let client = utils::client();
+    let _ = client
+        .get(format!("http://{plain_addr}"))
+        .send()
+        .await
+        .unwrap();
+
+    let requests = upstream.requests_received().await;
+    assert_eq!(requests.len(), 2);
+    assert_eq!(
+        requests[0].headers().get("x-forwarded-for").unwrap(),
+        "1.2.3.4:9999"
+    );
+}

@@ -41,6 +41,26 @@ pub(crate) enum Stream {
     AcmeTls(tokio_rustls::server::TlsStream<TcpStream>, Option<Arc<str>>),
 }
 
+/// An accepted connection that hasn't completed its PROXY protocol/TLS
+/// handshakes yet. Completed by [`Incoming::handshake`].
+pub(crate) struct Incoming {
+    stream: TcpStream,
+    peer: SocketAddr,
+    proxy_protocol: bool,
+    tls: IncomingTls,
+}
+
+enum IncomingTls {
+    None,
+    #[cfg(feature = "tls")]
+    File(Arc<rustls::ServerConfig>),
+    #[cfg(feature = "tls")]
+    Acme {
+        challenge_config: Arc<rustls::ServerConfig>,
+        server_config: Arc<rustls::ServerConfig>,
+    },
+}
+
 impl Listener {
     pub(crate) fn from_config(
         addr: SocketAddr,
@@ -154,130 +174,125 @@ impl Listener {
         }
     }
 
-    /// Returns a new connection once one is ready. If `proxy_protocol` was enabled,
-    /// the SocketAddr will be the address of the original peer
-    pub(crate) async fn accept(&self) -> io::Result<(Stream, SocketAddr)> {
-        match &self.inner {
-            ListenerInner::Plain(tcp_listener) => {
-                let (mut tcp_stream, mut peer) = tcp_listener.accept().await?;
-
-                if self.proxy_protocol {
-                    peer = match timeout(
-                        Duration::from_secs(2),
-                        parse_proxy_header(&mut tcp_stream, peer),
-                    )
-                    .await
-                    {
-                        Ok(Ok(addr)) => addr,
-                        Ok(Err(e)) => return Err(e),
-                        Err(_) => {
-                            tracing::warn!("Timeout reading PROXY header from {peer}");
-                            return Err(io::Error::new(
-                                io::ErrorKind::TimedOut,
-                                "proxy header timeout",
-                            ));
-                        }
-                    };
-                }
-
-                Ok((Stream::Plain(tcp_stream), peer))
-            }
+    /// Accepts a new tcp connection without performing any handshakes, so it
+    /// returns as fast as possible. Call [`Incoming::handshake`] in the
+    /// connection's task to finish setting it up.
+    pub(crate) async fn accept(&self) -> io::Result<Incoming> {
+        let (listener, tls) = match &self.inner {
+            ListenerInner::Plain(listener) => (listener, IncomingTls::None),
             #[cfg(feature = "tls")]
-            ListenerInner::FileTls(tcp_listener, server_config) => {
-                let (mut tcp_stream, mut peer) = tcp_listener.accept().await?;
-
-                if self.proxy_protocol {
-                    peer = match timeout(
-                        Duration::from_secs(2),
-                        parse_proxy_header(&mut tcp_stream, peer),
-                    )
-                    .await
-                    {
-                        Ok(Ok(addr)) => addr,
-                        Ok(Err(e)) => return Err(e),
-                        Err(_) => {
-                            tracing::warn!("Timeout reading PROXY header from {peer}");
-                            return Err(io::Error::new(
-                                io::ErrorKind::TimedOut,
-                                "proxy header timeout",
-                            ));
-                        }
-                    };
-                }
-
-                let tls_stream =
-                    crate::tls::stream::TlsStream::new(tcp_stream, server_config.clone());
-                Ok((Stream::FileTls(tls_stream), peer))
+            ListenerInner::FileTls(listener, server_config) => {
+                (listener, IncomingTls::File(server_config.clone()))
             }
             #[cfg(feature = "tls")]
             ListenerInner::AcmeTls {
                 listener,
                 challenge_config,
                 server_config,
-                local_addr: _local_addr,
-            } => loop {
-                tracing::trace!("Accepting connection with ACME...");
-                let (mut tcp_stream, mut peer) = listener.accept().await?;
+                local_addr: _,
+            } => (
+                listener,
+                IncomingTls::Acme {
+                    challenge_config: challenge_config.clone(),
+                    server_config: server_config.clone(),
+                },
+            ),
+        };
 
-                if self.proxy_protocol {
-                    peer = match timeout(
-                        Duration::from_secs(2),
-                        parse_proxy_header(&mut tcp_stream, peer),
-                    )
-                    .await
-                    {
-                        Ok(Ok(addr)) => addr,
-                        Ok(Err(e)) => return Err(e),
-                        Err(_) => {
-                            tracing::warn!("Timeout reading PROXY header from {peer}");
-                            return Err(io::Error::new(
-                                io::ErrorKind::TimedOut,
-                                "proxy header timeout",
-                            ));
-                        }
-                    };
+        let (stream, peer) = listener.accept().await?;
+
+        Ok(Incoming {
+            stream,
+            peer,
+            proxy_protocol: self.proxy_protocol,
+            tls,
+        })
+    }
+}
+
+impl Incoming {
+    /// Performs the PROXY protocol and TLS handshakes. If `proxy_protocol` was
+    /// enabled, the SocketAddr will be the address of the original peer.
+    /// Returns `None` if the connection was fully handled here (ACME challenges).
+    pub(crate) async fn handshake(self) -> io::Result<Option<(Stream, SocketAddr)>> {
+        let Self {
+            mut stream,
+            mut peer,
+            proxy_protocol,
+            tls,
+        } = self;
+
+        if proxy_protocol {
+            peer = match timeout(
+                Duration::from_secs(2),
+                parse_proxy_header(&mut stream, peer),
+            )
+            .await
+            {
+                Ok(Ok(addr)) => addr,
+                Ok(Err(e)) => return Err(e),
+                Err(_) => {
+                    tracing::warn!("Timeout reading PROXY header from {peer}");
+                    return Err(io::Error::new(
+                        io::ErrorKind::TimedOut,
+                        "proxy header timeout",
+                    ));
                 }
+            };
+        }
 
+        match tls {
+            IncomingTls::None => Ok(Some((Stream::Plain(stream), peer))),
+            #[cfg(feature = "tls")]
+            IncomingTls::File(server_config) => {
+                let tls_stream = crate::tls::stream::TlsStream::new(stream, server_config);
+                Ok(Some((Stream::FileTls(tls_stream), peer)))
+            }
+            #[cfg(feature = "tls")]
+            IncomingTls::Acme {
+                challenge_config,
+                server_config,
+            } => {
                 let Ok(start_handshake) = timeout(
                     Duration::from_secs(2),
-                    tokio_rustls::LazyConfigAcceptor::new(Default::default(), tcp_stream),
+                    tokio_rustls::LazyConfigAcceptor::new(Default::default(), stream),
                 )
                 .await
                 else {
                     tracing::warn!("Timeout receiving client hello from {peer}");
-                    continue;
+                    return Ok(None);
                 };
                 let start_handshake = start_handshake?;
 
                 if rustls_acme::is_tls_alpn_challenge(&start_handshake.client_hello()) {
                     tracing::info!("received TLS-ALPN-01 validation request");
-                    let challenge_config = challenge_config.clone();
-                    tokio::spawn(async move {
-                        let Ok(mut tls) = start_handshake.into_stream(challenge_config).await
-                        else {
-                            tracing::error!("Error in ACME challenge handshake");
-                            return;
-                        };
-                        if let Err(err) = tls.shutdown().await {
-                            tracing::error!("Error in ACME challenge conn: {err:?}")
-                        };
-                    });
+                    let Ok(mut tls) = start_handshake.into_stream(challenge_config).await else {
+                        tracing::error!("Error in ACME challenge handshake");
+                        return Ok(None);
+                    };
+                    if let Err(err) = tls.shutdown().await {
+                        tracing::error!("Error in ACME challenge conn: {err:?}")
+                    };
+                    Ok(None)
                 } else {
                     tracing::trace!("Accepting TLS connection...");
                     let domain = start_handshake.client_hello().server_name().map(Arc::from);
-                    let Ok(tls_res) = timeout(
+                    let tls_res = match timeout(
                         Duration::from_secs(2),
-                        start_handshake.into_stream(server_config.clone()),
+                        start_handshake.into_stream(server_config),
                     )
                     .await
-                    else {
-                        tracing::warn!("Timeout accepting ACME TLS conn form {peer}");
-                        continue;
+                    {
+                        Ok(tls_res) => tls_res,
+                        Err(_) => {
+                            tracing::warn!("Timeout accepting ACME TLS conn form {peer}");
+                            return Ok(None);
+                        }
                     };
 
-                    return Ok((Stream::AcmeTls(tls_res?, domain), peer));
+                    Ok(Some((Stream::AcmeTls(tls_res?, domain), peer)))
                 }
-            },
+            }
         }
     }
 }

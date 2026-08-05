@@ -36,9 +36,8 @@ use std::sync::{Arc, Mutex};
 use cache::Cache;
 use config::Upstream;
 use conn_pool::Pool;
-use futures_util::future::join;
-use futures_util::stream::FuturesUnordered;
-use futures_util::{StreamExt, TryStreamExt};
+use futures_util::future::{join, join_all};
+use futures_util::TryStreamExt;
 use handle::handle_req;
 use http::header::{ALT_SVC, HOST};
 use http::{HeaderValue, Response};
@@ -51,7 +50,7 @@ use itertools::Itertools;
 use listener::Listener;
 #[cfg(feature = "tls")]
 use tls::stream::TlsStream;
-use tokio::io::{AsyncRead, AsyncWrite, BufReader};
+use tokio::io::BufReader;
 use tokio::net::TcpListener;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
@@ -217,28 +216,43 @@ impl Server {
         let stats_collector = self.stats_collector.clone();
 
         async move {
-            loop {
-                tracing::trace!("[tcp] {} permits left", semaphore.available_permits());
-                if let Ok(permit) = semaphore.clone().acquire_owned().await {
-                    let (stream, peer_addr) = accept_next(&listeners).await;
-                    tracing::debug!("Accepted connection from {}", peer_addr);
-                    let domain = stream.domain();
-                    #[cfg(feature = "prometheus")]
-                    stats_collector.add_tcp_conn();
+            let accept_loops = listeners.into_iter().map(|listener| {
+                let semaphore = semaphore.clone();
+                let config = config.clone();
+                let upstreams = upstreams.clone();
+                let cache = cache.clone();
+                #[cfg(feature = "prometheus")]
+                let stats_collector = stats_collector.clone();
 
-                    handle_connection(
-                        BufReader::with_capacity(config.client_buffer_size, stream),
-                        peer_addr,
-                        domain,
-                        config.clone(),
-                        cache.clone(),
-                        upstreams.clone(),
-                        permit,
-                        #[cfg(feature = "prometheus")]
-                        stats_collector.clone(),
-                    );
+                async move {
+                    loop {
+                        tracing::trace!("[tcp] {} permits left", semaphore.available_permits());
+                        if let Ok(permit) = semaphore.clone().acquire_owned().await {
+                            match listener.accept().await {
+                                Ok(incoming) => {
+                                    #[cfg(feature = "prometheus")]
+                                    stats_collector.add_tcp_conn();
+
+                                    handle_connection(
+                                        incoming,
+                                        config.clone(),
+                                        cache.clone(),
+                                        upstreams.clone(),
+                                        permit,
+                                        #[cfg(feature = "prometheus")]
+                                        stats_collector.clone(),
+                                    );
+                                }
+                                Err(err) => tracing::error!("accept error: {err:?}"),
+                            }
+                        }
+                    }
                 }
-            }
+            });
+
+            join_all(accept_loops).await;
+
+            Ok(())
         }
     }
 
@@ -428,11 +442,9 @@ impl Server {
     }
 }
 
-#[tracing::instrument(skip(stream, config, cache, conn_pools, permit))]
-fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
-    stream: S,
-    peer_addr: SocketAddr,
-    domain: Option<Arc<str>>,
+#[tracing::instrument(skip_all)]
+fn handle_connection(
+    incoming: listener::Incoming,
     config: Arc<Config>,
     cache: Arc<Cache>,
     conn_pools: Arc<Upstreams>,
@@ -442,65 +454,78 @@ fn handle_connection<S: AsyncRead + AsyncWrite + Unpin + Send + 'static>(
     #[cfg(feature = "h3")]
     let h3_port = config.h3_addr.map(|s| s.port());
 
-    let service = service_fn({
-        move |req: Request<Incoming>| {
-            let domain = domain.clone();
+    tokio::spawn(async move {
+        let (stream, peer_addr) = match incoming.handshake().await {
+            Ok(Some(accepted)) => accepted,
+            Ok(None) => return,
+            Err(err) => {
+                tracing::warn!("Error in connection handshake: {err:?}");
+                return;
+            }
+        };
+        tracing::debug!("Accepted connection from {}", peer_addr);
+        let domain = stream.domain();
+        let stream = BufReader::with_capacity(config.client_buffer_size, stream);
+
+        let service = service_fn({
             let config = config.clone();
-            let cache = cache.clone();
-            let conn_pools = conn_pools.clone();
-            #[cfg(feature = "prometheus")]
-            let stats_collector = stats_collector.clone();
-
-            #[cfg(feature = "prometheus")]
-            let path = Arc::<str>::from(req.uri().path());
-            #[cfg(feature = "prometheus")]
-            let host = extract_host(&req).map(Arc::<str>::from);
-            #[cfg(feature = "prometheus")]
-            stats_collector.add_req(&req, path.clone(), host.clone());
-
-            async move {
-                let mut res = handle::handle_req(
-                    req.map(|incoming| incoming.map_err(Error::from).boxed()),
-                    peer_addr,
-                    domain,
-                    Arc::clone(&config),
-                    Arc::clone(&cache),
-                    Arc::clone(&conn_pools),
-                )
-                .await;
+            move |req: Request<Incoming>| {
+                let domain = domain.clone();
+                let config = config.clone();
+                let cache = cache.clone();
+                let conn_pools = conn_pools.clone();
+                #[cfg(feature = "prometheus")]
+                let stats_collector = stats_collector.clone();
 
                 #[cfg(feature = "prometheus")]
-                let _ = res
-                    .as_ref()
-                    .inspect(move |res| stats_collector.add_res(res, path, host));
+                let path = Arc::<str>::from(req.uri().path());
+                #[cfg(feature = "prometheus")]
+                let host = extract_host(&req).map(Arc::<str>::from);
+                #[cfg(feature = "prometheus")]
+                stats_collector.add_req(&req, path.clone(), host.clone());
 
-                tracing::trace!("Responded to req from {}", peer_addr);
+                async move {
+                    let mut res = handle::handle_req(
+                        req.map(|incoming| incoming.map_err(Error::from).boxed()),
+                        peer_addr,
+                        domain,
+                        Arc::clone(&config),
+                        Arc::clone(&cache),
+                        Arc::clone(&conn_pools),
+                    )
+                    .await;
 
-                #[cfg(feature = "h3")]
-                {
-                    // add alt-svc header so client know we support h3
-                    // TODO: make the max-age, persist configurable. I'm never turning it off so I don't care
-                    if config.will_start_h3() {
-                        res = res.map(|mut res| {
-                            res.headers_mut().insert(
-                                ALT_SVC,
-                                HeaderValue::try_from(format!(
-                                    "h3=\":{}\"; ma=2592000; persist=1",
-                                    h3_port.unwrap()
-                                ))
-                                .unwrap(),
-                            );
-                            res
-                        });
+                    #[cfg(feature = "prometheus")]
+                    let _ = res
+                        .as_ref()
+                        .inspect(move |res| stats_collector.add_res(res, path, host));
+
+                    tracing::trace!("Responded to req from {}", peer_addr);
+
+                    #[cfg(feature = "h3")]
+                    {
+                        // add alt-svc header so client know we support h3
+                        // TODO: make the max-age, persist configurable. I'm never turning it off so I don't care
+                        if config.will_start_h3() {
+                            res = res.map(|mut res| {
+                                res.headers_mut().insert(
+                                    ALT_SVC,
+                                    HeaderValue::try_from(format!(
+                                        "h3=\":{}\"; ma=2592000; persist=1",
+                                        h3_port.unwrap()
+                                    ))
+                                    .unwrap(),
+                                );
+                                res
+                            });
+                        }
                     }
+
+                    res
                 }
-
-                res
             }
-        }
-    });
+        });
 
-    tokio::spawn(async move {
         tracing::trace!("Handling connection from {}", peer_addr);
         let mut conn_build = hyper_util::server::conn::auto::Builder::new(TokioExecutor::new());
         conn_build.http1().timer(TokioTimer::new());
@@ -594,26 +619,4 @@ fn init_upstreams(config: &mut Config) -> Upstreams {
     upstreams.shrink_to_fit();
 
     upstreams
-}
-
-/// Loops until a connection comes in on one of the listeners
-async fn accept_next(listeners: &[Listener]) -> (listener::Stream, SocketAddr) {
-    let mut futures = FuturesUnordered::new();
-
-    loop {
-        futures.clear();
-
-        for listener in listeners {
-            futures.push(listener.accept());
-        }
-
-        while let Some(res) = futures.next().await {
-            match res {
-                Ok(accepted) => return accepted,
-                Err(err) => {
-                    tracing::error!("accept error: {err:?}");
-                }
-            }
-        }
-    }
 }
