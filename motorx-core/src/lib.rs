@@ -47,7 +47,7 @@ use hyper::service::service_fn;
 use hyper::Request;
 use hyper_util::rt::{TokioExecutor, TokioIo, TokioTimer};
 use itertools::Itertools;
-use listener::Listener;
+use listener::{Listener, ListenerTls};
 #[cfg(feature = "tls")]
 use tls::stream::TlsStream;
 use tokio::io::BufReader;
@@ -95,11 +95,14 @@ impl Server {
 
         config.rules.sort_by(|a, b| a.path.cmp(&b.path));
         let config = Arc::new(config);
+        // Built once and shared by every listener: each ACME state runs its own
+        // order, so separate states per listener would fail validation.
+        let tls = ListenerTls::from_config(&config);
         let listeners: Vec<_> = config
             .tcp_addrs
             .iter()
             .map(|tcp_config| {
-                Listener::from_config(tcp_config.addr, tcp_config.proxy_protocol, &config)
+                Listener::new(tcp_config.addr, tcp_config.proxy_protocol, tls.clone())
             })
             .try_collect()?;
 
@@ -108,7 +111,7 @@ impl Server {
             if config.h3_addr.is_some() {
                 // Only start h3 if the address is set and TLS is enabled
                 // TODO: if we do tls stuff in tcp config this needs to change, but chill for now
-                if let Some(server_config) = listeners[0].server_config() {
+                if let Some(server_config) = tls.server_config() {
                     Some(h3::Listener::new(config.clone(), &server_config))
                 } else {
                     tracing::warn!("Not starting h3 server since TLS isn't enabled.");

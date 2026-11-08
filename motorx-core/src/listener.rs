@@ -13,24 +13,12 @@ use tokio::{
     time::timeout,
 };
 
-use crate::{config::Tls, Config};
+use crate::Config;
 
 pub(crate) struct Listener {
-    inner: ListenerInner,
+    listener: TcpListener,
     proxy_protocol: bool,
-}
-
-pub(crate) enum ListenerInner {
-    Plain(tokio::net::TcpListener),
-    #[cfg(feature = "tls")]
-    FileTls(tokio::net::TcpListener, Arc<rustls::ServerConfig>),
-    #[cfg(feature = "tls")]
-    AcmeTls {
-        listener: TcpListener,
-        challenge_config: Arc<rustls::ServerConfig>,
-        server_config: Arc<rustls::ServerConfig>,
-        local_addr: SocketAddr,
-    },
+    tls: ListenerTls,
 }
 
 pub(crate) enum Stream {
@@ -47,10 +35,16 @@ pub(crate) struct Incoming {
     stream: TcpStream,
     peer: SocketAddr,
     proxy_protocol: bool,
-    tls: IncomingTls,
+    tls: ListenerTls,
 }
 
-enum IncomingTls {
+/// TLS setup shared by every listener (and the h3 listener).
+///
+/// Must be built exactly once per server via [`ListenerTls::from_config`]:
+/// for ACME, each instance runs its own order with its own challenge certs, so
+/// multiple instances would serve each other's validation certs and fail.
+#[derive(Clone)]
+pub(crate) enum ListenerTls {
     None,
     #[cfg(feature = "tls")]
     File(Arc<rustls::ServerConfig>),
@@ -61,151 +55,113 @@ enum IncomingTls {
     },
 }
 
-impl Listener {
-    pub(crate) fn from_config(
-        addr: SocketAddr,
-        proxy_protocol: bool,
-        config: &Config,
-    ) -> Result<Self, crate::Error> {
-        if let Some(tls) = &config.tls {
-            #[cfg(feature = "tls")]
-            {
-                use crate::tls;
-                use rustls_acme::{caches::DirCache, AcmeConfig};
+impl ListenerTls {
+    pub(crate) fn from_config(config: &Config) -> Self {
+        let Some(tls) = &config.tls else {
+            return Self::None;
+        };
 
-                match tls {
-                    Tls::File { certs, private_key } => {
-                        let tls_config = {
-                            // Load public certificate.
-                            let certs = tls::load_certs(certs).unwrap();
+        #[cfg(feature = "tls")]
+        {
+            use crate::{config::Tls, tls};
+            use rustls_acme::{caches::DirCache, AcmeConfig};
 
-                            // Load private key.
-                            let key = tls::load_private_key(private_key).unwrap();
+            match tls {
+                Tls::File { certs, private_key } => {
+                    // Load public certificate.
+                    let certs = tls::load_certs(certs).unwrap();
 
-                            rustls::crypto::aws_lc_rs::default_provider()
-                                .install_default()
-                                .ok();
+                    // Load private key.
+                    let key = tls::load_private_key(private_key).unwrap();
 
-                            // Do not use client certificate authentication.
-                            let mut cfg = rustls::ServerConfig::builder()
-                                .with_no_client_auth()
-                                .with_single_cert(certs, key)
-                                .unwrap();
+                    rustls::crypto::aws_lc_rs::default_provider()
+                        .install_default()
+                        .ok();
 
-                            // Configure ALPN to accept HTTP/2, HTTP/1.1 in that order.
-                            cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+                    // Do not use client certificate authentication.
+                    let mut cfg = rustls::ServerConfig::builder()
+                        .with_no_client_auth()
+                        .with_single_cert(certs, key)
+                        .unwrap();
 
-                            Arc::new(cfg)
-                        };
+                    // Configure ALPN to accept HTTP/2, HTTP/1.1 in that order.
+                    cfg.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
-                        Ok(Self {
-                            inner: ListenerInner::FileTls(crate::tcp_listener(addr)?, tls_config),
-                            proxy_protocol,
-                        })
-                    }
-                    Tls::Acme { domains, cache_dir } => {
-                        let listener = crate::tcp_listener(addr)?;
-                        let local_addr = listener.local_addr()?;
-                        let prod = !domains.contains(&"localhost".to_string());
-                        let mut state = AcmeConfig::new(&**domains)
-                            .cache(DirCache::new(cache_dir.clone()))
-                            .directory_lets_encrypt(prod)
-                            .state();
-                        let challenge_config = state.challenge_rustls_config();
-                        let mut server_config = (*state.default_rustls_config()).clone();
-                        server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
+                    Self::File(Arc::new(cfg))
+                }
+                Tls::Acme { domains, cache_dir } => {
+                    let prod = !domains.contains(&"localhost".to_string());
+                    let mut state = AcmeConfig::new(&**domains)
+                        .cache(DirCache::new(cache_dir.clone()))
+                        .directory_lets_encrypt(prod)
+                        .state();
+                    let challenge_config = state.challenge_rustls_config();
+                    let mut server_config = (*state.default_rustls_config()).clone();
+                    server_config.alpn_protocols = vec![b"h2".to_vec(), b"http/1.1".to_vec()];
 
-                        tokio::spawn(async move {
-                            loop {
-                                match state.next().await.unwrap() {
-                                    Ok(ok) => tracing::debug!("event: {:?}", ok),
-                                    Err(err) => tracing::error!("error: {:?}", err),
-                                }
+                    tokio::spawn(async move {
+                        loop {
+                            match state.next().await.unwrap() {
+                                Ok(ok) => tracing::debug!("event: {:?}", ok),
+                                Err(err) => tracing::error!("error: {:?}", err),
                             }
-                        });
+                        }
+                    });
 
-                        Ok(Self {
-                            inner: ListenerInner::AcmeTls {
-                                listener,
-                                challenge_config,
-                                server_config: Arc::new(server_config),
-                                local_addr,
-                            },
-                            proxy_protocol,
-                        })
+                    Self::Acme {
+                        challenge_config,
+                        server_config: Arc::new(server_config),
                     }
                 }
             }
-
-            #[cfg(not(feature = "tls"))]
-            Ok(Self {
-                inner: ListenerInner::Plain(crate::tcp_listener(addr)?),
-                proxy_protocol,
-            })
-        } else {
-            Ok(Self {
-                inner: ListenerInner::Plain(crate::tcp_listener(addr)?),
-                proxy_protocol,
-            })
         }
-    }
 
-    pub(crate) fn local_addr(&self) -> io::Result<SocketAddr> {
-        match &self.inner {
-            ListenerInner::Plain(tcp_listener) => tcp_listener.local_addr(),
-            #[cfg(feature = "tls")]
-            ListenerInner::FileTls(tcp_listener, _) => tcp_listener.local_addr(),
-            #[cfg(feature = "tls")]
-            ListenerInner::AcmeTls { local_addr, .. } => Ok(*local_addr),
+        #[cfg(not(feature = "tls"))]
+        {
+            let _ = tls;
+            Self::None
         }
     }
 
     #[cfg(feature = "tls")]
     pub(crate) fn server_config(&self) -> Option<Arc<rustls::ServerConfig>> {
-        match &self.inner {
-            ListenerInner::Plain(_) => None,
-            ListenerInner::FileTls(_, server_config) => Some(server_config.clone()),
-            ListenerInner::AcmeTls {
-                listener: _,
-                challenge_config: _,
-                server_config,
-                local_addr: _,
-            } => Some(server_config.clone()),
+        match self {
+            Self::None => None,
+            Self::File(server_config) | Self::Acme { server_config, .. } => {
+                Some(server_config.clone())
+            }
         }
+    }
+}
+
+impl Listener {
+    pub(crate) fn new(
+        addr: SocketAddr,
+        proxy_protocol: bool,
+        tls: ListenerTls,
+    ) -> Result<Self, crate::Error> {
+        Ok(Self {
+            listener: crate::tcp_listener(addr)?,
+            proxy_protocol,
+            tls,
+        })
+    }
+
+    pub(crate) fn local_addr(&self) -> io::Result<SocketAddr> {
+        self.listener.local_addr()
     }
 
     /// Accepts a new tcp connection without performing any handshakes, so it
     /// returns as fast as possible. Call [`Incoming::handshake`] in the
     /// connection's task to finish setting it up.
     pub(crate) async fn accept(&self) -> io::Result<Incoming> {
-        let (listener, tls) = match &self.inner {
-            ListenerInner::Plain(listener) => (listener, IncomingTls::None),
-            #[cfg(feature = "tls")]
-            ListenerInner::FileTls(listener, server_config) => {
-                (listener, IncomingTls::File(server_config.clone()))
-            }
-            #[cfg(feature = "tls")]
-            ListenerInner::AcmeTls {
-                listener,
-                challenge_config,
-                server_config,
-                local_addr: _,
-            } => (
-                listener,
-                IncomingTls::Acme {
-                    challenge_config: challenge_config.clone(),
-                    server_config: server_config.clone(),
-                },
-            ),
-        };
-
-        let (stream, peer) = listener.accept().await?;
+        let (stream, peer) = self.listener.accept().await?;
 
         Ok(Incoming {
             stream,
             peer,
             proxy_protocol: self.proxy_protocol,
-            tls,
+            tls: self.tls.clone(),
         })
     }
 }
@@ -242,14 +198,14 @@ impl Incoming {
         }
 
         match tls {
-            IncomingTls::None => Ok(Some((Stream::Plain(stream), peer))),
+            ListenerTls::None => Ok(Some((Stream::Plain(stream), peer))),
             #[cfg(feature = "tls")]
-            IncomingTls::File(server_config) => {
+            ListenerTls::File(server_config) => {
                 let tls_stream = crate::tls::stream::TlsStream::new(stream, server_config);
                 Ok(Some((Stream::FileTls(tls_stream), peer)))
             }
             #[cfg(feature = "tls")]
-            IncomingTls::Acme {
+            ListenerTls::Acme {
                 challenge_config,
                 server_config,
             } => {
@@ -265,14 +221,26 @@ impl Incoming {
                 let start_handshake = start_handshake?;
 
                 if rustls_acme::is_tls_alpn_challenge(&start_handshake.client_hello()) {
-                    tracing::info!("received TLS-ALPN-01 validation request");
-                    let Ok(mut tls) = start_handshake.into_stream(challenge_config).await else {
-                        tracing::error!("Error in ACME challenge handshake");
-                        return Ok(None);
-                    };
-                    if let Err(err) = tls.shutdown().await {
-                        tracing::error!("Error in ACME challenge conn: {err:?}")
-                    };
+                    let domain = start_handshake.client_hello().server_name().map(str::to_owned);
+                    tracing::info!("received TLS-ALPN-01 validation request for {domain:?}");
+                    match timeout(
+                        Duration::from_secs(2),
+                        start_handshake.into_stream(challenge_config),
+                    )
+                    .await
+                    {
+                        Ok(Ok(mut tls)) => {
+                            if let Err(err) = tls.shutdown().await {
+                                tracing::debug!("Error closing ACME challenge conn: {err:?}")
+                            };
+                        }
+                        // The validator usually hangs up as soon as it has read
+                        // the certificate, so handshake errors here are expected.
+                        Ok(Err(err)) => {
+                            tracing::debug!("ACME challenge handshake ended: {err:?}")
+                        }
+                        Err(_) => tracing::warn!("Timeout in ACME challenge handshake from {peer}"),
+                    }
                     Ok(None)
                 } else {
                     tracing::trace!("Accepting TLS connection...");
